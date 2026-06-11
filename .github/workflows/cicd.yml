@@ -56,3 +56,14 @@ jobs:
         
         # Access token configured securely in your repository secrets
         hf-token: ${{ secrets.HF_TOKEN }}
+        run: |
+                # 1. Configure a temporary git author identity for the runner
+                git config --global user.email "actions@github.com"
+                git config --global user.name "GitHub Actions"
+                
+                # 2. Add the Hugging Face Space repository as a remote endpoint
+                # Make sure to change 'your-username' and 'your-space-name' to match your HF Space exactly
+                git remote add hf https://Zeyd-dev:$HF_TOKEN@huggingface.co/spaces/your-username/your-space-name
+                
+                # 3. Force push the main branch directly into the Hugging Face Space repository
+                git push hf main --force
