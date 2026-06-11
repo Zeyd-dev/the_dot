@@ -1,0 +1,26 @@
+# Local environment variables / API Keys
+.env
+.env.local
+.env.*.local
+
+# Streamlit specific local configurations
+.streamlit/config.toml
+.streamlit/secrets.toml
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+pyvenv.cfg
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Operating system files
+.DS_Store
+Thumbs.db
