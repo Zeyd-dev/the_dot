@@ -8,7 +8,7 @@ to the LLM, keeping prompt size small and response time fast (~3-4s).
 
 import json
 import pandas as pd
-
+import os  # <─── ADD THIS LINE AT THE TOP
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL   = "llama-3.1-8b-instant"
 OLLAMA_MODEL = "llama3.2"
