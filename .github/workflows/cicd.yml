@@ -52,7 +52,7 @@ jobs:
       with:
         # The exact format is: username/space-name
         # Replace this with your actual Hugging Face Space identifier
-        space-id: 'spaces/Zeyd123/The_Dot'
+        space-id: 'Zeyd123/The_Dot'
         
         # Access token configured securely in your repository secrets
         hf-token: ${{ secrets.HF_TOKEN }}
