@@ -35,27 +35,24 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
   # ─── CONTINUOUS DEPLOYMENT (CD) ───
-  deploy-docker:
+  deploy-to-huggingface:
     needs: validate-and-test
     runs-on: ubuntu-latest
-    # Only deploy when pushing directly to the main branch
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
-
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
       with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        fetch-depth: 0
+        lfs: true
 
-    - name: Build and Push Docker image
-      uses: docker/build-push-action@v5
+    - name: Push to Hugging Face Spaces
+      uses: hfcpp/action-hf-spaces-deploy@v1.1.0
       with:
-        context: .
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/dot-resource-matcher:latest
-          ${{ secrets.DOCKERHUB_USERNAME }}/dot-resource-matcher:${{ github.sha }}
+        # The exact format is: username/space-name
+        # Replace this with your actual Hugging Face Space identifier
+        space-id: 'spaces/Zeyd123/The_Dot'
+        
+        # Access token configured securely in your repository secrets
+        hf-token: ${{ secrets.HF_TOKEN }}
