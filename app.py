@@ -218,7 +218,7 @@ with st.form("diagnostic_form"):
         stage = st.selectbox("Current stage", ["ideation","pre-seed","seed","growth","scale"],
             help="ideation=idea only | pre-seed=building MVP | seed=have product | growth=revenue+scaling | scale=new markets")
     with c2:
-        st.info({"ideation":"💡 Idea phase — no product yet","pre-seed":"🔨 Building MVP","seed":"🌱 Product live — seeking market fit","growth":"📊 Revenue & growing","scale":"🚀 Scaling to new markets"}.get(stage,""))
+        st.caption("💡 ideation → 🔨 pre-seed → 🌱 seed → 📊 growth → 🚀 scale")
     c1, c2, c3 = st.columns(3)
     with c1: has_product   = st.checkbox("We have a product / MVP")
     with c2: has_customers = st.checkbox("We have paying / active customers")
