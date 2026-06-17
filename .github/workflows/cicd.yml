@@ -29,10 +29,7 @@ jobs:
 
     - name: Lint code for critical syntax errors
       run: |
-        # Stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats formatting style issues as warnings instead of breaking the build
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
   # ─── CONTINUOUS DEPLOYMENT (CD) ───
   deploy-to-huggingface:
@@ -45,25 +42,13 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        lfs: true
 
-    - name: Push to Hugging Face Spaces
-      uses: hfcpp/action-hf-spaces-deploy@v1.1.0
-      with:
-        # The exact format is: username/space-name
-        # Replace this with your actual Hugging Face Space identifier
-        space-id: 'Zeyd123/The_Dot'
-        
-        # Access token configured securely in your repository secrets
-        hf-token: ${{ secrets.HF_TOKEN }}
-        run: |
-                # 1. Configure a temporary git author identity for the runner
-                git config --global user.email "actions@github.com"
-                git config --global user.name "GitHub Actions"
-                
-                # 2. Add the Hugging Face Space repository as a remote endpoint
-                # Make sure to change 'your-username' and 'your-space-name' to match your HF Space exactly
-                git remote add hf https://Zeyd-dev:$HF_TOKEN@huggingface.co/spaces/your-username/your-space-name
-                
-                # 3. Force push the main branch directly into the Hugging Face Space repository
-                git push hf main --force
+    - name: Push codebase straight to Hugging Face Spaces
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+        # Houni baddal l'espace b esm el Space mta3ek (Zeyd123/The_Dot walla Zeyd-dev/the_dot) 
+        git remote add hf https://Zeyd-dev:$HF_TOKEN@huggingface.co/spaces/Zeyd123/The_Dot
+        git push hf main --force
