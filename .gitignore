@@ -24,3 +24,23 @@ __pycache__/
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Runtime configuration (admin-modified settings — do not commit)
+settings.json
+
+# ChromaDB vector store (rebuilt with: python build_rag_index.py)
+chroma_db/
+
+# Local databases
+*.db
+*.sqlite
+
+# Generated documents / reports (rebuilt on demand)
+*.pptx
+*.docx
+*.tex
+rapport_the_dot.*
+
+# Model cache (downloaded automatically by sentence-transformers)
+.cache/
+models/

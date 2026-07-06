@@ -4,25 +4,87 @@ Matching chain: Groq (fast cloud) → Ollama (local) → Rule-based (always work
 
 Performance optimization: rule-based pre-filter sends only top candidates
 to the LLM, keeping prompt size small and response time fast (~3-4s).
+
+Improvements:
+  - "stages_raw" included in all result dicts so build_eligibility_checklist
+    can compare the real programme stages instead of falling back to
+    [effective_stage].
+  - Groq calls now have an explicit timeout (GROQ_TIMEOUT) so a slow response
+    never blocks the Streamlit UI indefinitely.
+  - load_resources() is cached with @st.cache_data to avoid re-reading the CSV
+    on every match() call (was previously re-read on every user interaction).
+  - LLM config (model names, URL, timeout) imported from config.py.
 """
 
 import json
+import os
+
 import pandas as pd
-import os  # <─── ADD THIS LINE AT THE TOP
+import streamlit as st
+
+_ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=_ENV_PATH)
+except ImportError:
+    pass
+
+from config import (
+    GROQ_MODEL,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+    OLLAMA_TIMEOUT,
+)
+import app_settings as _settings
+from embeddings import encode_resources, semantic_scores as compute_semantic_scores
+
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-GROQ_MODEL   = "llama-3.1-8b-instant"
-OLLAMA_MODEL = "llama3.2"
-OLLAMA_URL   = "http://localhost:11434/api/generate"
 
-# How many candidates to send to the LLM (after rule-based pre-filter)
-LLM_CANDIDATE_LIMIT = 8
-# Max chars for prose fields in the LLM prompt (full text stays in CSV for display)
 PROSE_TRUNCATE = 90
+DESC_TRUNCATE  = 140
 
 
-# ── Load resources ─────────────────────────────────────────────────────────────
+# ── Load resources (cached) ────────────────────────────────────────────────────
 
-def load_resources(path="resources.csv") -> pd.DataFrame:
+@st.cache_data(show_spinner=False)
+def _cached_resource_embeddings(path: str = "resources.csv") -> dict:
+    """
+    Encode all resources into embedding vectors and cache the result.
+    This runs once per Streamlit server session (~2-3s on first load, then instant).
+    Returns a plain dict (resource_id → list) — st.cache_data requires
+    JSON-serialisable types, so we convert numpy arrays to lists here and
+    restore them in the caller.
+
+    A 30-second timeout guards against slow first-time model downloads:
+    if the model isn't ready in time, we return {} and fall back to
+    pure rule-based scoring — the app stays responsive.
+    """
+    import concurrent.futures
+    df = load_resources(path)
+
+    def _encode():
+        raw = encode_resources(df)
+        return {rid: vec.tolist() for rid, vec in raw.items()}
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_encode)
+            return future.result(timeout=30)
+    except concurrent.futures.TimeoutError:
+        print("[matcher] Embedding model load timed out (>30s). Falling back to rule-based scoring.")
+        return {}
+    except Exception as e:
+        print(f"[matcher] Embeddings unavailable ({e}). Semantic scoring disabled.")
+        return {}
+
+
+@st.cache_data(show_spinner=False)
+def load_resources(path: str = "resources.csv") -> pd.DataFrame:
+    """
+    Load and parse resources.csv.
+    Cached with @st.cache_data so the CSV is read from disk only once per
+    Streamlit server session, not on every match() call.
+    """
     df = pd.read_csv(path)
     list_cols = ["stages", "needs", "sectors"]
     for col in list_cols:
@@ -30,44 +92,41 @@ def load_resources(path="resources.csv") -> pd.DataFrame:
             df[col] = df[col].apply(lambda x: [s.strip() for s in str(x).split(",")])
     if "diaspora_only" in df.columns:
         df["diaspora_only"] = df["diaspora_only"].astype(str).str.lower() == "true"
+    if "outside_hub_only" in df.columns:
+        df["outside_hub_only"] = df["outside_hub_only"].astype(str).str.lower() == "true"
     if "international_focus" in df.columns:
         df["international_focus"] = df["international_focus"].astype(str).str.lower() == "true"
     return df
 
 
-# ── Hard filters (always applied before any matching) ─────────────────────────
+# ── Hard filters ───────────────────────────────────────────────────────────────
 
 def apply_hard_filters(df: pd.DataFrame, profile: dict) -> pd.DataFrame:
     filtered = []
     for _, row in df.iterrows():
         if row.get("diaspora_only") and not profile.get("diaspora"):
             continue
+        if row.get("outside_hub_only") and not profile.get("outside_tunis"):
+            continue
         filtered.append(row)
     return pd.DataFrame(filtered)
 
 
-# ── Rule-based scorer (used both as fallback AND pre-filter) ──────────────────
+# ── Rule-based scorer ──────────────────────────────────────────────────────────
 
 def rule_based_score(resource: pd.Series, profile: dict) -> tuple:
-    """
-    Deterministic scoring used when all LLM options are unavailable,
-    and also to pre-filter candidates before sending to the LLM.
-    Returns (score, reasons_list).
-    """
     score = 0.0
     reasons = []
     startup_needs  = set(profile.get("needs", []))
     startup_stage  = profile.get("stage", "pre-seed")
     startup_sector = profile.get("sector", "other")
 
-    # Stage match (30 pts)
     if startup_stage in resource["stages"]:
         score += 30
         reasons.append(f"Matches your current stage ({startup_stage})")
     else:
         score -= 10
 
-    # Needs overlap (up to 40 pts)
     resource_needs = set(resource["needs"])
     overlap = startup_needs & resource_needs
     if overlap:
@@ -75,11 +134,9 @@ def rule_based_score(resource: pd.Series, profile: dict) -> tuple:
         readable = [n.replace("_", " ") for n in overlap]
         reasons.append(f"Covers: {', '.join(readable)}")
 
-    # Sector match bonus
     if "all" in resource["sectors"] or startup_sector in resource["sectors"]:
         score += 10
 
-    # Flag bonuses
     if profile.get("diaspora") and resource.get("diaspora_only"):
         score += 20
         reasons.append("Purpose-built for diaspora founders")
@@ -116,7 +173,6 @@ def rule_based_score(resource: pd.Series, profile: dict) -> tuple:
 
 
 def _truncate(text: str, max_chars: int) -> str:
-    """Truncate a prose string for the LLM prompt to keep tokens low."""
     if not text or len(str(text)) <= max_chars:
         return str(text) if text else ""
     return str(text)[:max_chars].rsplit(" ", 1)[0] + "…"
@@ -125,11 +181,6 @@ def _truncate(text: str, max_chars: int) -> str:
 # ── Prompt builder ─────────────────────────────────────────────────────────────
 
 def build_prompt(profile: dict, resources_df: pd.DataFrame, spider_scores: dict = None) -> str:
-    """
-    Build the LLM prompt. resources_df should already be pre-filtered to
-    LLM_CANDIDATE_LIMIT rows — do NOT pass the full CSV here.
-    Prose fields are truncated to PROSE_TRUNCATE chars to keep token count low.
-    """
     profile_json = json.dumps({
         "stage":           profile.get("stage"),
         "stated_stage":    profile.get("stated_stage"),
@@ -157,7 +208,6 @@ def build_prompt(profile: dict, resources_df: pd.DataFrame, spider_scores: dict 
         }
     }, indent=2)
 
-    # Spider scores section
     spider_section = ""
     if spider_scores:
         spider_section = "\nMATURITY SCORES (0-100):\n"
@@ -169,15 +219,15 @@ def build_prompt(profile: dict, resources_df: pd.DataFrame, spider_scores: dict 
             "STRONG dims = lower priority (founder already doing well there).\n"
         )
 
-    # Resource catalogue — prose fields truncated to keep prompt small
     resources_text = ""
     for _, row in resources_df.iterrows():
+        desc    = _truncate(row.get("description", ""), DESC_TRUNCATE)
         ideal   = _truncate(row.get("ideal_profile", ""), PROSE_TRUNCATE)
         not_for = _truncate(row.get("not_suited_for", ""), PROSE_TRUNCATE)
         seq     = _truncate(row.get("sequencing_note", ""), PROSE_TRUNCATE)
         resources_text += (
             f"\n---\nID: {row['id']} | {row['name']} ({row['type']})\n"
-            f"Description: {row['description']}\n"
+            f"Description: {desc}\n"
             f"Ideal: {ideal}\n"
             f"Exclude if: {not_for}\n"
             f"Sequence: {seq}\n"
@@ -222,17 +272,21 @@ Rules:
 - score: 0-100 integer
 - priority: "immediate" | "short-term" | "when-ready"
 - reasons: 2-3 short strings, specific to THIS startup
-- advice: one actionable sentence
+- advice: one actionable sentence. Do NOT mention the resource ID (R001, R002, etc.) — refer to the programme by name only.
 - Return raw JSON array only.
 """
     return prompt
 
 
-# ── LLM call: Groq ────────────────────────────────────────────────────────────
+# ── LLM calls ─────────────────────────────────────────────────────────────────
 
 def _call_groq(prompt: str) -> list:
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY not set in environment")
     from groq import Groq
-    client   = Groq(api_key=GROQ_API_KEY)
+    # Explicit timeout prevents an unresponsive Groq endpoint from hanging
+    # the Streamlit UI indefinitely (previously had no timeout at all).
+    client   = Groq(api_key=GROQ_API_KEY, timeout=_settings.get("groq_timeout"))
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -242,8 +296,6 @@ def _call_groq(prompt: str) -> list:
     raw = response.choices[0].message.content.strip()
     return _parse_json(raw)
 
-
-# ── LLM call: Ollama (local fallback) ─────────────────────────────────────────
 
 def _call_ollama(prompt: str) -> list:
     import urllib.request
@@ -258,13 +310,11 @@ def _call_ollama(prompt: str) -> list:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
+    with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
         result = json.loads(resp.read().decode())
     raw = result.get("response", "").strip()
     return _parse_json(raw)
 
-
-# ── JSON extraction helper ─────────────────────────────────────────────────────
 
 def _parse_json(raw: str) -> list:
     if "```" in raw:
@@ -284,29 +334,103 @@ def _parse_json(raw: str) -> list:
 
 # ── Main match function ────────────────────────────────────────────────────────
 
-def match(profile: dict, resources_path="resources.csv", top_n=8, spider_scores: dict = None) -> list:
+def match(profile: dict, resources_path: str = "resources.csv", top_n: int = 8, spider_scores: dict = None) -> list:
     """
     Matching chain:
-      1. Groq (cloud LLM, fast)         — preferred
-      2. Ollama (local LLM, slower)     — fallback if Groq fails
-      3. Rule-based scorer              — always works, no dependencies
+      1. Groq  (cloud LLM, fast)    — preferred
+      2. Ollama (local LLM, slower) — fallback if Groq fails
+      3. Rule-based scorer          — always works, no dependencies
 
-    Performance: rule-based pre-filter runs first to select top LLM_CANDIDATE_LIMIT
-    candidates. Only those are sent to the LLM, keeping prompts small and fast.
+    All result dicts include "stages_raw" (list of stages accepted by the
+    programme), used by build_eligibility_checklist to display correct
+    eligibility criteria.
     """
     df_all      = load_resources(resources_path)
     df_filtered = apply_hard_filters(df_all, profile)
     resource_lookup = {row["id"]: row for _, row in df_all.iterrows()}
 
-    # ── Pre-filter: rule-based score on all filtered resources ────────────────
-    # This keeps the LLM prompt small regardless of catalogue size.
-    pre_scores = []
-    for _, row in df_filtered.iterrows():
-        sc, _ = rule_based_score(row, profile)
-        pre_scores.append((sc, row["id"]))
+    # ── Pre-filter: retrieve top candidates ───────────────────────────────────
+    # Two modes controlled by USE_RAG in config.py:
+    #
+    # Mode 1 (default, USE_RAG=False): in-memory hybrid scoring
+    #   Loads embeddings as numpy arrays, combines with rule-based score.
+    #   hybrid = RULE_WEIGHT * rule_score + SEMANTIC_WEIGHT * semantic_score * 100
+    #
+    # Mode 2 (USE_RAG=True): ChromaDB vector database
+    #   Queries the persistent index built by: python vector_store.py
+    #   Falls back to Mode 1 if index is empty or chromadb not installed.
+    #
+    # Read runtime settings (admin may have changed them from the UI)
+    cfg              = _settings.load()
+    use_rag          = cfg["use_rag"]
+    rule_weight      = cfg["rule_weight"]
+    semantic_weight  = cfg["semantic_weight"]
+    candidate_limit  = cfg["llm_candidate_limit"]
 
-    pre_scores.sort(reverse=True)
-    top_ids = {rid for _, rid in pre_scores[:LLM_CANDIDATE_LIMIT]}
+    sem_scores: dict[str, float] = {}
+    hybrid_scores: dict[str, float] = {}
+
+    if use_rag:
+        # ── RAG mode: ChromaDB retrieval ──────────────────────────────────────
+        try:
+            from vector_store import retrieve_with_scores, index_exists
+            if index_exists():
+                sem_scores = retrieve_with_scores(profile, top_k=candidate_limit)
+                top_ids    = set(sem_scores.keys())
+                hybrid_scores = {rid: round(score * 100, 1) for rid, score in sem_scores.items()}
+                print(f"[matcher] RAG retrieval: {len(top_ids)} candidates from ChromaDB.")
+            else:
+                print("[matcher] RAG mode enabled but index is empty — run: python vector_store.py")
+                print("[matcher] Falling back to in-memory hybrid scoring.")
+                use_rag = False
+        except Exception as e:
+            print(f"[matcher] RAG retrieval failed ({e}). Falling back to in-memory.")
+            use_rag = False
+
+    if not use_rag:
+        # ── Default mode: in-memory hybrid scoring ────────────────────────────
+        try:
+            import numpy as np
+            raw_embeddings = _cached_resource_embeddings(resources_path)
+            if raw_embeddings:
+                np_embeddings = {rid: np.array(vec) for rid, vec in raw_embeddings.items()}
+                sem_scores = compute_semantic_scores(profile, np_embeddings)
+                print(f"[matcher] Semantic scores computed for {len(sem_scores)} resources.")
+        except Exception as e:
+            print(f"[matcher] Semantic scoring failed ({e}). Using rule-based only.")
+
+        # Normalise semantic scores min-max within the candidate set so the
+        # best semantic match = 1.0 and the worst = 0.0.
+        # Without this, all 8 programs (same domain) cluster at 0.62–0.78,
+        # giving only ~6 pts variation — the semantic component is invisible.
+        # After normalisation, the 0.4 weight contributes a full 0–40 pt range.
+        if sem_scores:
+            s_min = min(sem_scores.values())
+            s_max = max(sem_scores.values())
+            sem_range = s_max - s_min
+            if sem_range > 1e-6:
+                sem_scores_norm = {
+                    rid: (s - s_min) / sem_range
+                    for rid, s in sem_scores.items()
+                }
+            else:
+                # All identical — treat as 0.5 (neutral)
+                sem_scores_norm = {rid: 0.5 for rid in sem_scores}
+        else:
+            sem_scores_norm = {}
+
+        pre_scores = []
+        hybrid_scores: dict[str, float] = {}
+        for _, row in df_filtered.iterrows():
+            rule_sc, _ = rule_based_score(row, profile)
+            sem_sc     = sem_scores_norm.get(row["id"], 0.0)
+            hybrid_sc  = (rule_weight * rule_sc + semantic_weight * sem_sc * 100
+                          if sem_scores_norm else rule_sc)
+            hybrid_scores[row["id"]] = round(hybrid_sc, 1)
+            pre_scores.append((hybrid_sc, row["id"]))
+        pre_scores.sort(reverse=True)
+        top_ids = {rid for _, rid in pre_scores[:candidate_limit]}
+
     df_candidates = df_filtered[df_filtered["id"].isin(top_ids)].copy()
 
     print(f"[matcher] Pre-filter: {len(df_filtered)} → {len(df_candidates)} candidates sent to LLM")
@@ -314,7 +438,6 @@ def match(profile: dict, resources_path="resources.csv", top_n=8, spider_scores:
     prompt = build_prompt(profile, df_candidates, spider_scores=spider_scores)
     print(f"[matcher] Prompt size: ~{len(prompt)//4} tokens")
 
-    # ── Layer 1: Groq ─────────────────────────────────────────────────────────
     llm_results = None
     llm_source  = None
 
@@ -325,7 +448,6 @@ def match(profile: dict, resources_path="resources.csv", top_n=8, spider_scores:
     except Exception as e:
         print(f"[matcher] Groq unavailable ({type(e).__name__}: {e}). Trying Ollama...")
 
-    # ── Layer 2: Ollama ───────────────────────────────────────────────────────
     if llm_results is None:
         try:
             llm_results = _call_ollama(prompt)
@@ -334,29 +456,31 @@ def match(profile: dict, resources_path="resources.csv", top_n=8, spider_scores:
         except Exception as e:
             print(f"[matcher] Ollama unavailable ({type(e).__name__}: {e}). Using rule-based fallback.")
 
-    # ── Layer 3: Rule-based (full fallback — runs on all filtered resources) ──
+    # Fallback rule-based
     if llm_results is None:
         results = []
         for _, row in df_filtered.iterrows():
             score, reasons = rule_based_score(row, profile)
             if score > 0:
                 results.append({
-                    "id":          row["id"],
-                    "name":        row["name"],
-                    "type":        row["type"],
-                    "description": row["description"],
-                    "score":       round(score, 1),
-                    "priority":    "short-term",
-                    "reasons":     reasons,
-                    "advice":      "",
-                    "url":         row["url"],
-                    "llm_powered": False,
-                    "llm_source":  "rule-based",
+                    "id":            row["id"],
+                    "name":          row["name"],
+                    "type":          row["type"],
+                    "description":   row["description"],
+                    "score":         hybrid_scores.get(row["id"], round(score, 1)),
+                    "priority":      "short-term",
+                    "reasons":       reasons,
+                    "advice":        "",
+                    "url":           row["url"],
+                    "stages_raw":    list(row["stages"]),
+                    "llm_powered":   False,
+                    "llm_source":    "rule-based",
+                    "semantic_score": round(sem_scores_norm.get(row["id"], 0.0) * 100, 1),
                 })
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_n]
 
-    # ── Merge LLM results with CSV ground truth ────────────────────────────────
+    # Merge LLM results — score = hybrid (reliable), order = hybrid, text = LLM
     results = []
     for item in llm_results:
         rid = item.get("id")
@@ -364,17 +488,19 @@ def match(profile: dict, resources_path="resources.csv", top_n=8, spider_scores:
             continue
         row = resource_lookup[rid]
         results.append({
-            "id":          rid,
-            "name":        row["name"],
-            "type":        row["type"],
-            "description": row["description"],
-            "score":       item.get("score", 50),
-            "priority":    item.get("priority", "short-term"),
-            "reasons":     item.get("reasons", []),
-            "advice":      item.get("advice", ""),
-            "url":         row["url"],
-            "llm_powered": True,
-            "llm_source":  llm_source,
+            "id":            rid,
+            "name":          row["name"],
+            "type":          row["type"],
+            "description":   row["description"],
+            "score":         hybrid_scores.get(rid, round(item.get("score", 50), 1)),
+            "priority":      item.get("priority", "short-term"),
+            "reasons":       item.get("reasons", []),
+            "advice":        item.get("advice", ""),
+            "url":           row["url"],
+            "stages_raw":    list(row["stages"]),
+            "llm_powered":   True,
+            "llm_source":    llm_source,
+            "semantic_score": round(sem_scores_norm.get(rid, 0.0) * 100, 1),
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
