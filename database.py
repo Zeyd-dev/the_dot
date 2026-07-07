@@ -1,162 +1,136 @@
 """
-database.py — Couche d'accès MySQL pour The Dot Resource Matcher
-Gère : connexion, initialisation du schéma, CRUD diagnostics, utilisateurs
+database.py — PostgreSQL (Supabase) data layer for The Dot Resource Matcher
 
-Améliorations apportées :
-  - Connexions ouvertes/fermées via un context manager (`with get_cursor() as cursor`),
-    qui garantit la fermeture même en cas d'exception (avant : risque de connexions
-    MySQL non fermées si une erreur survenait entre l'ouverture et le close()).
-  - init_db() ne s'exécute plus qu'une seule fois par process (avant : ré-exécutée à
-    chaque rerun Streamlit via bootstrap_admin(), donc à chaque clic).
-  - Le schéma SQL est découpé en instructions explicites plutôt que par split(";"),
-    ce qui évite qu'un futur ";" dans une donnée ne casse l'initialisation.
-  - Toutes les fonctions exposent désormais les erreurs MySQL sous forme de
-    DatabaseError (exception dédiée), que l'UI peut intercepter pour afficher un
-    message propre au lieu de crasher l'application.
-  - delete_user() refuse désormais de supprimer le dernier compte admin restant.
-  - ROLES centralise les rôles valides (au lieu de les dupliquer entre le schéma
-    SQL et les composants d'UI).
+Migrated from MySQL to PostgreSQL to support Supabase free-tier hosting.
+The public API is identical — same function signatures, same return shapes.
+
+Setup:
+  1. Go to Supabase → Settings → Database → Connection string → URI
+  2. Copy the URI and set it as DATABASE_URL in your .env file
+  3. Run the app — tables are created automatically on first launch
 """
 
 import json
 import os
 from contextlib import contextmanager
-from datetime import datetime
 
-import mysql.connector
-from mysql.connector import pooling
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Configuration connexion ────────────────────────────────────────────────────
-DB_CONFIG = {
-    "host":     os.getenv("DB_HOST", "localhost"),
-    "port":     int(os.getenv("DB_PORT", 3306)),
-    "user":     os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD", ""),
-    "database": os.getenv("DB_NAME", "dot_matcher"),
-}
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Rôles valides — référencés à la fois par le schéma SQL et par l'UI,
-# pour éviter toute désynchronisation entre les deux.
 ROLES = ("admin", "viewer")
 
 
 class DatabaseError(Exception):
-    """Erreur d'accès à la base, destinée à être affichée proprement par l'UI
-    plutôt que de remonter une trace MySQL brute jusqu'à l'utilisateur final."""
+    """Wrapped DB error shown cleanly in the UI instead of a raw psycopg2 trace."""
     pass
 
 
-# ── Pool de connexions ─────────────────────────────────────────────────────────
-# Un pool évite d'ouvrir une connexion TCP neuve à chaque requête (ce qui était
-# le cas avant : get_connection() était appelée — et donc une nouvelle connexion
-# créée — dans chacune des ~15 fonctions de ce module). Le pool est initialisé
-# une seule fois et réutilisé pour toute la durée de vie du process Streamlit.
+# ── Connection pool ────────────────────────────────────────────────────────────
 _pool = None
 
 
 def _get_pool():
     global _pool
     if _pool is None:
-        try:
-            _pool = pooling.MySQLConnectionPool(
-                pool_name="dot_matcher_pool",
-                pool_size=5,
-                **DB_CONFIG,
+        if not DATABASE_URL:
+            raise DatabaseError(
+                "DATABASE_URL is not set. "
+                "Copy it from Supabase → Settings → Database → URI and add it to .env"
             )
-        except mysql.connector.Error as e:
-            raise DatabaseError(f"Impossible de joindre la base de données : {e}") from e
+        try:
+            _pool = psycopg2.pool.ThreadedConnectionPool(
+                minconn=1,
+                maxconn=10,
+                dsn=DATABASE_URL,
+                sslmode="require",
+            )
+        except psycopg2.Error as e:
+            raise DatabaseError(f"Cannot connect to database: {e}") from e
     return _pool
 
 
 @contextmanager
-def get_cursor(dictionary: bool = False, commit: bool = False):
+def get_cursor(dictionary: bool = True, commit: bool = False):
     """
-    Context manager central pour toute interaction avec la base.
-    Garantit la fermeture du curseur et de la connexion même en cas d'exception,
-    et convertit les erreurs MySQL en DatabaseError exploitable par l'UI.
-
-    Usage :
-        with get_cursor(dictionary=True) as cursor:
-            cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
-            return cursor.fetchone()
+    Central context manager for all DB operations.
+    Always uses RealDictCursor so rows are accessed as row["column"].
     """
     conn = None
     cursor = None
     try:
-        conn = _get_pool().get_connection()
-        cursor = conn.cursor(dictionary=dictionary)
+        conn = _get_pool().getconn()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         yield cursor
         if commit:
             conn.commit()
-    except mysql.connector.Error as e:
-        if conn is not None:
+    except psycopg2.Error as e:
+        if conn:
             conn.rollback()
         raise DatabaseError(str(e)) from e
     finally:
-        if cursor is not None:
+        if cursor:
             cursor.close()
-        if conn is not None:
-            conn.close()
+        if conn:
+            _get_pool().putconn(conn)
 
 
-# ── Initialisation du schéma ───────────────────────────────────────────────────
-# Découpé en instructions explicites plutôt que str.split(";") sur un bloc unique :
-# un ";" dans une valeur par défaut ou un futur commentaire ne casse plus le script.
+# ── Schema ─────────────────────────────────────────────────────────────────────
 SCHEMA_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS users (
-        id            INT AUTO_INCREMENT PRIMARY KEY,
+        id            SERIAL PRIMARY KEY,
         username      VARCHAR(80)  NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
-        role          ENUM('admin', 'viewer') NOT NULL DEFAULT 'viewer',
-        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        role          VARCHAR(10)  NOT NULL DEFAULT 'viewer'
+                      CHECK(role IN ('admin', 'viewer')),
+        created_at    TIMESTAMP DEFAULT NOW()
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS diagnostics (
-        id              INT AUTO_INCREMENT PRIMARY KEY,
+        id              SERIAL PRIMARY KEY,
         startup_name    VARCHAR(120),
         sector          VARCHAR(80),
         stage           VARCHAR(40),
-        is_diaspora     TINYINT(1) DEFAULT 0,
-        outside_tunis   TINYINT(1) DEFAULT 0,
+        is_diaspora     SMALLINT DEFAULT 0,
+        outside_tunis   SMALLINT DEFAULT 0,
         team_size       INT DEFAULT 1,
-        has_product     TINYINT(1) DEFAULT 0,
-        has_clients     TINYINT(1) DEFAULT 0,
-        has_revenue     TINYINT(1) DEFAULT 0,
-        is_incorporated TINYINT(1) DEFAULT 0,
-        has_startup_act TINYINT(1) DEFAULT 0,
-        is_ai           TINYINT(1) DEFAULT 0,
-        scores          JSON,
-        needs           JSON,
-        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        has_product     SMALLINT DEFAULT 0,
+        has_clients     SMALLINT DEFAULT 0,
+        has_revenue     SMALLINT DEFAULT 0,
+        is_incorporated SMALLINT DEFAULT 0,
+        has_startup_act SMALLINT DEFAULT 0,
+        is_ai           SMALLINT DEFAULT 0,
+        scores          JSONB,
+        needs           JSONB,
+        created_at      TIMESTAMP DEFAULT NOW()
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS recommendations (
-        id            INT AUTO_INCREMENT PRIMARY KEY,
+        id            SERIAL PRIMARY KEY,
         diagnostic_id INT NOT NULL,
         program_id    VARCHAR(20),
         program_name  VARCHAR(120),
         score         FLOAT,
         priority      VARCHAR(30),
-        reasons       JSON,
+        reasons       JSONB,
         FOREIGN KEY (diagnostic_id) REFERENCES diagnostics(id) ON DELETE CASCADE
     )
     """,
 ]
 
-# Garde-fou process-local : évite de ré-exécuter CREATE TABLE IF NOT EXISTS à
-# chaque rerun Streamlit (bootstrap_admin() est appelée à chaque interaction).
 _schema_initialized = False
 
 
 def init_db(force: bool = False):
-    """Crée les tables si elles n'existent pas. Idempotent côté SQL (IF NOT EXISTS),
-    mais on évite quand même de refaire l'aller-retour réseau à chaque clic."""
+    """Create tables if they don't exist. Idempotent."""
     global _schema_initialized
     if _schema_initialized and not force:
         return
@@ -166,16 +140,16 @@ def init_db(force: bool = False):
     _schema_initialized = True
 
 
-# ── Utilisateurs ───────────────────────────────────────────────────────────────
+# ── Users ──────────────────────────────────────────────────────────────────────
 def get_user(username: str):
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
         return cursor.fetchone()
 
 
 def create_user(username: str, password_hash: str, role: str = "viewer") -> bool:
     if role not in ROLES:
-        raise ValueError(f"Rôle invalide : {role!r}. Attendu l'un de {ROLES}.")
+        raise ValueError(f"Invalid role: {role!r}. Expected one of {ROLES}.")
     try:
         with get_cursor(commit=True) as cursor:
             cursor.execute(
@@ -184,15 +158,13 @@ def create_user(username: str, password_hash: str, role: str = "viewer") -> bool
             )
         return True
     except DatabaseError as e:
-        # Conflit d'unicité sur username (le plus probable) -> on signale juste
-        # un échec de création, sans remonter le détail SQL à l'UI.
-        if "Duplicate entry" in str(e):
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
             return False
         raise
 
 
 def list_users():
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute(
             "SELECT id, username, role, created_at FROM users ORDER BY created_at DESC"
         )
@@ -200,26 +172,21 @@ def list_users():
 
 
 def count_admins() -> int:
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'admin'")
         return int(cursor.fetchone()["total"] or 0)
 
 
 def delete_user(user_id: int):
-    """Supprime un compte, sauf s'il s'agit du dernier administrateur restant —
-    ce qui bloquerait définitivement l'accès au dashboard d'administration."""
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute("SELECT role FROM users WHERE id = %s", (user_id,))
         target = cursor.fetchone()
         if target is None:
-            return  # déjà supprimé / inexistant : rien à faire
-
+            return
         if target["role"] == "admin":
             cursor.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'admin'")
             if int(cursor.fetchone()["total"] or 0) <= 1:
-                raise ValueError(
-                    "Impossible de supprimer le dernier compte administrateur."
-                )
+                raise ValueError("Cannot delete the last admin account.")
 
     with get_cursor(commit=True) as cursor:
         cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
@@ -235,6 +202,7 @@ def save_diagnostic(profile: dict, scores: dict, needs: list, recommendations: l
                  team_size, has_product, has_clients, has_revenue,
                  is_incorporated, has_startup_act, is_ai, scores, needs)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
             """,
             (
                 profile.get("startup_name", ""),
@@ -253,7 +221,7 @@ def save_diagnostic(profile: dict, scores: dict, needs: list, recommendations: l
                 json.dumps(needs),
             ),
         )
-        diag_id = cursor.lastrowid
+        diag_id = cursor.fetchone()["id"]
 
         for rec in recommendations:
             cursor.execute(
@@ -276,34 +244,33 @@ def save_diagnostic(profile: dict, scores: dict, needs: list, recommendations: l
 
 
 def _parse_scores(raw) -> dict:
-    """Normalise les scores JSON — gère str, dict, et None."""
     if raw is None:
         return {}
+    if isinstance(raw, dict):
+        return raw
     if isinstance(raw, str):
         try:
             return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except Exception:
             return {}
-    if isinstance(raw, dict):
-        return raw
     return {}
 
 
 def _parse_list(raw) -> list:
     if raw is None:
         return []
+    if isinstance(raw, list):
+        return raw
     if isinstance(raw, str):
         try:
             return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except Exception:
             return []
-    if isinstance(raw, list):
-        return raw
     return []
 
 
 def get_all_diagnostics():
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute(
             """
             SELECT id, startup_name, sector, stage, is_diaspora, outside_tunis,
@@ -313,29 +280,29 @@ def get_all_diagnostics():
             ORDER BY created_at DESC
             """
         )
-        rows = cursor.fetchall()
+        rows = [dict(r) for r in cursor.fetchall()]
 
     for row in rows:
         row["scores"] = _parse_scores(row["scores"])
-        row["needs"] = _parse_list(row["needs"])
+        row["needs"]  = _parse_list(row["needs"])
     return rows
 
 
 def get_diagnostic_with_recs(diag_id: int):
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute("SELECT * FROM diagnostics WHERE id = %s", (diag_id,))
         diag = cursor.fetchone()
         if not diag:
             return None
-
+        diag = dict(diag)
         diag["scores"] = _parse_scores(diag["scores"])
-        diag["needs"] = _parse_list(diag["needs"])
+        diag["needs"]  = _parse_list(diag["needs"])
 
         cursor.execute(
             "SELECT * FROM recommendations WHERE diagnostic_id = %s ORDER BY score DESC",
             (diag_id,),
         )
-        recs = cursor.fetchall()
+        recs = [dict(r) for r in cursor.fetchall()]
         for r in recs:
             r["reasons"] = _parse_list(r["reasons"])
 
@@ -348,12 +315,12 @@ def delete_diagnostic(diag_id: int):
         cursor.execute("DELETE FROM diagnostics WHERE id = %s", (diag_id,))
 
 
-# ── Statistiques agrégées ──────────────────────────────────────────────────────
+# ── Stats ──────────────────────────────────────────────────────────────────────
 def get_stats() -> dict:
     stats = {}
     dims = ["Team", "Legal", "Product", "Traction", "Funding", "Market", "Branding"]
 
-    with get_cursor(dictionary=True) as cursor:
+    with get_cursor() as cursor:
         cursor.execute("SELECT COUNT(*) AS total FROM diagnostics")
         stats["total_diagnostics"] = int(cursor.fetchone()["total"] or 0)
 
@@ -403,7 +370,6 @@ def get_stats() -> dict:
             for r in cursor.fetchall()
         ]
 
-        # ── Maturité moyenne — clés en majuscules dans la DB ──────────────
         cursor.execute("SELECT scores FROM diagnostics")
         all_score_rows = cursor.fetchall()
         if all_score_rows:
@@ -421,11 +387,12 @@ def get_stats() -> dict:
         else:
             stats["avg_scores"] = {}
 
+        # PostgreSQL date functions (replaces MySQL DATE_FORMAT / DATE_SUB)
         cursor.execute(
             """
-            SELECT DATE_FORMAT(created_at, '%%Y-%%m') AS month, COUNT(*) AS count
+            SELECT TO_CHAR(created_at, 'YYYY-MM') AS month, COUNT(*) AS count
             FROM diagnostics
-            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+            WHERE created_at >= NOW() - INTERVAL '12 months'
             GROUP BY month
             ORDER BY month ASC
             """
@@ -438,12 +405,12 @@ def get_stats() -> dict:
         cursor.execute(
             """
             SELECT
-                ROUND(AVG(has_product)     * 100, 1) AS pct_product,
-                ROUND(AVG(has_clients)     * 100, 1) AS pct_clients,
-                ROUND(AVG(has_revenue)     * 100, 1) AS pct_revenue,
-                ROUND(AVG(is_incorporated) * 100, 1) AS pct_incorporated,
-                ROUND(AVG(has_startup_act) * 100, 1) AS pct_startup_act,
-                ROUND(AVG(is_diaspora)     * 100, 1) AS pct_diaspora
+                ROUND((AVG(has_product)     * 100)::NUMERIC, 1) AS pct_product,
+                ROUND((AVG(has_clients)     * 100)::NUMERIC, 1) AS pct_clients,
+                ROUND((AVG(has_revenue)     * 100)::NUMERIC, 1) AS pct_revenue,
+                ROUND((AVG(is_incorporated) * 100)::NUMERIC, 1) AS pct_incorporated,
+                ROUND((AVG(has_startup_act) * 100)::NUMERIC, 1) AS pct_startup_act,
+                ROUND((AVG(is_diaspora)     * 100)::NUMERIC, 1) AS pct_diaspora
             FROM diagnostics
             """
         )

@@ -19,8 +19,7 @@ sentence-transformers>=2.7.0   # MiniLM-L12-v2 multilingual embeddings (118 MB)
 chromadb>=0.5.0
 
 # ── Database ───────────────────────────────────────────────────────────────────
-mysql-connector-python          # MySQL production database
-# sqlite3 is part of the Python standard library — no install needed for local dev
+psycopg2-binary                 # PostgreSQL driver for Supabase
 
 # ── Auth / Security ────────────────────────────────────────────────────────────
 bcrypt
