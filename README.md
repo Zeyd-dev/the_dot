@@ -1,3 +1,13 @@
+---
+title: The Dot Resource Matcher
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # The Dot — Resource Matcher
 
 An intelligent matchmaking tool that connects startups to The Dot's programs, mentors, and services based on a structured diagnostic. Built with Streamlit, a hybrid rule-based + semantic scoring engine, and an optional ChromaDB vector store.
