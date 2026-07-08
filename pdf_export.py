@@ -29,6 +29,47 @@ def generate_diagnostic_pdf(diagnostic: dict) -> bytes:
         return _generate_minimal_pdf(diagnostic)
 
 
+def _normalize(diagnostic: dict) -> dict:
+    """
+    Normalise les deux formats de dict possibles :
+      - format DB  : keys 'scores', 'recommendations' (program_name, reasons)
+      - format live: keys 'spider_scores', 'results' (name, advice)
+    Retourne un dict unifié utilisé par _generate_with_reportlab.
+    """
+    # scores
+    scores = diagnostic.get("scores") or diagnostic.get("spider_scores") or {}
+
+    # recommendations
+    raw_recs = diagnostic.get("recommendations") or diagnostic.get("results") or []
+    recs = []
+    for r in raw_recs:
+        reasons = r.get("reasons") or []
+        if not reasons and r.get("advice"):
+            reasons = [r["advice"]]
+        recs.append({
+            "program_name": r.get("program_name") or r.get("name", "—"),
+            "score":        r.get("score", 0),
+            "priority":     r.get("priority", ""),
+            "reasons":      reasons,
+        })
+
+    return {
+        "startup_name":    diagnostic.get("startup_name", ""),
+        "sector":          diagnostic.get("sector", "—"),
+        "stage":           diagnostic.get("stage", "—"),
+        "created_at":      diagnostic.get("created_at", datetime.now().strftime("%Y-%m-%d")),
+        "team_size":       diagnostic.get("team_size", "—"),
+        "is_incorporated": diagnostic.get("is_incorporated", False),
+        "has_product":     diagnostic.get("has_product", False),
+        "has_clients":     diagnostic.get("has_clients", False),
+        "has_revenue":     diagnostic.get("has_revenue", False),
+        "has_startup_act": diagnostic.get("has_startup_act", False),
+        "scores":          scores,
+        "needs":           diagnostic.get("needs", []),
+        "recommendations": recs,
+    }
+
+
 def _generate_with_reportlab(diagnostic: dict) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -38,6 +79,8 @@ def _generate_with_reportlab(diagnostic: dict) -> bytes:
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
     )
     from reportlab.lib.enums import TA_CENTER, TA_LEFT  # noqa: F401
+
+    diagnostic = _normalize(diagnostic)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -54,8 +97,6 @@ def _generate_with_reportlab(diagnostic: dict) -> bytes:
     BLUE_LIGHT = colors.HexColor("#eff6ff")   # noqa: F841
     GRAY       = colors.HexColor("#64748b")
     GRAY_LIGHT = colors.HexColor("#f1f5f9")
-    GREEN      = colors.HexColor("#16a34a")
-    ORANGE     = colors.HexColor("#d97706")
 
     styles = getSampleStyleSheet()
     style_h2 = ParagraphStyle("H2", parent=styles["Heading2"],
@@ -65,7 +106,7 @@ def _generate_with_reportlab(diagnostic: dict) -> bytes:
         fontSize=9, textColor=GRAY, leading=14, spaceAfter=4)
 
     content = []
-    name    = diagnostic.get("startup_name", "Startup")
+    name    = diagnostic.get("startup_name", "Startup") or "Startup"
     sector  = diagnostic.get("sector", "—")
     stage   = diagnostic.get("stage", "—")
     date    = str(diagnostic.get("created_at", datetime.now().strftime("%Y-%m-%d")))[:10]
@@ -128,14 +169,15 @@ def _generate_with_reportlab(diagnostic: dict) -> bytes:
         score_rows = []
         for dim, sc in scores.items():
             sc_int = int(sc) if sc else 0
-            level = "Fort" if sc_int >= 70 else ("Modéré" if sc_int >= 40 else "Faible")
-            level_color = GREEN if sc_int >= 70 else (ORANGE if sc_int >= 40 else colors.red)
+            level     = "Fort" if sc_int >= 70 else ("Modéré" if sc_int >= 40 else "Faible")
+            color_hex = "16a34a" if sc_int >= 70 else ("d97706" if sc_int >= 40 else "dc2626")
+            lc        = colors.HexColor(f"#{color_hex}")
             bar_filled = "█" * (sc_int // 10) + "░" * (10 - sc_int // 10)
             score_rows.append([
                 Paragraph(f"<b>{dim}</b>", ParagraphStyle("sc_dim", fontSize=8.5, textColor=BLUE_DARK, fontName="Helvetica-Bold")),
-                Paragraph(f"<font color='#{level_color.hexval()[2:]}'>{bar_filled}</font>", ParagraphStyle("bar", fontSize=7, fontName="Courier")),
+                Paragraph(f"<font color='#{color_hex}'>{bar_filled}</font>", ParagraphStyle("bar", fontSize=7, fontName="Courier")),
                 Paragraph(f"<b>{sc_int}</b>/100", ParagraphStyle("sc_val", fontSize=9, textColor=BLUE_DARK, fontName="Helvetica-Bold")),
-                Paragraph(level, ParagraphStyle("sc_lev", fontSize=8, textColor=level_color)),
+                Paragraph(level, ParagraphStyle("sc_lev", fontSize=8, textColor=lc)),
             ])
         score_table = Table(score_rows, colWidths=[3.5*cm, 8*cm, 2.5*cm, 3*cm])
         score_table.setStyle(TableStyle([
@@ -209,7 +251,8 @@ def _generate_minimal_pdf(diagnostic: dict) -> bytes:
     and writing a correct xref table — previously startxref was hardcoded
     to 0 which made the file unreadable.
     """
-    name  = diagnostic.get("startup_name", "Startup")
+    diagnostic  = _normalize(diagnostic)
+    name  = diagnostic.get("startup_name", "Startup") or "Startup"
     stage = diagnostic.get("stage", "—")
     date  = str(diagnostic.get("created_at", datetime.now().strftime("%Y-%m-%d")))[:10]
 
