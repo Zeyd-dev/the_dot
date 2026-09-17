@@ -1,16 +1,18 @@
 """
 api.py — FastAPI backend for The Dot Resource Matcher
 Exposes the matching engine as a REST API so the React frontend can consume it.
-Runs on port 7861 (or any port) alongside Streamlit.
+Runs on port 7860 inside HuggingFace Spaces Docker.
 """
 
 import json
 import os
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException
+import psycopg2
+import psycopg2.extras
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -33,6 +35,80 @@ app.add_middleware(
 )
 
 RESOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources.csv")
+DATABASE_URL   = os.getenv("DATABASE_URL", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "thedot2026")
+
+
+# ── Database helpers ────────────────────────────────────────────────────────
+
+def _get_conn():
+    return psycopg2.connect(DATABASE_URL)
+
+
+def _ensure_submissions_table():
+    """Create the submissions table if it doesn't exist."""
+    if not DATABASE_URL:
+        return
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS submissions (
+                id            SERIAL PRIMARY KEY,
+                startup_name  TEXT,
+                sector        TEXT,
+                stage         TEXT,
+                effective_stage TEXT,
+                market_type   TEXT,
+                team_size     INTEGER,
+                legal_status  TEXT,
+                needs         TEXT[],
+                top_program   TEXT,
+                top_score     FLOAT,
+                eligible_count INTEGER,
+                spider_scores JSONB,
+                timestamp     TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] ensure_table error: {e}")
+
+
+def _log_submission(req, response):
+    """Persist a diagnostic result to Supabase."""
+    if not DATABASE_URL:
+        return
+    try:
+        top = response.results[0] if response.results else {}
+        eligible = sum(1 for r in response.results if r.get("eligible"))
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO submissions
+              (startup_name, sector, stage, effective_stage, market_type,
+               team_size, legal_status, needs, top_program, top_score,
+               eligible_count, spider_scores)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            req.startup_name, req.sector, req.stage, response.effective_stage,
+            req.market_type, req.team_size, req.legal_status,
+            response.needs,
+            top.get("name", ""), float(top.get("score", 0)),
+            eligible,
+            json.dumps(response.spider_scores),
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] log_submission error: {e}")
+
+
+# Ensure table exists at startup
+_ensure_submissions_table()
 
 
 # ── Request / Response schemas ──────────────────────────────────────────────
@@ -160,7 +236,7 @@ def run_match(req: DiagnosticRequest):
         else:
             r["priority"] = "low"
 
-    return DiagnosticResponse(
+    response = DiagnosticResponse(
         startup_name=req.startup_name,
         effective_stage=effective_stage,
         stage_warning=profile.get("stage_warning"),
@@ -169,6 +245,89 @@ def run_match(req: DiagnosticRequest):
         results=results,
         timestamp=datetime.now().isoformat(),
     )
+
+    # Persist to Supabase asynchronously (best-effort — never block the user)
+    try:
+        _log_submission(req, response)
+    except Exception:
+        pass
+
+    return response
+
+
+# ── Admin endpoints ─────────────────────────────────────────────────────────
+
+class AdminLoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/admin/login")
+def admin_login(body: AdminLoginRequest):
+    if body.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Mot de passe incorrect")
+    return {"ok": True}
+
+
+@app.get("/api/admin/stats")
+def admin_stats(pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        return {"total": 0, "today": 0, "by_stage": {}, "by_sector": {}, "top_programs": []}
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        cur.execute("SELECT COUNT(*) FROM submissions")
+        total = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM submissions WHERE timestamp::date = CURRENT_DATE")
+        today = cur.fetchone()[0]
+
+        cur.execute("SELECT effective_stage, COUNT(*) FROM submissions GROUP BY effective_stage ORDER BY COUNT(*) DESC")
+        by_stage = {r[0]: r[1] for r in cur.fetchall()}
+
+        cur.execute("SELECT sector, COUNT(*) FROM submissions GROUP BY sector ORDER BY COUNT(*) DESC LIMIT 8")
+        by_sector = {r[0]: r[1] for r in cur.fetchall()}
+
+        cur.execute("SELECT top_program, COUNT(*) as n FROM submissions WHERE top_program != '' GROUP BY top_program ORDER BY n DESC LIMIT 5")
+        top_programs = [{"name": r[0], "count": r[1]} for r in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+        return {"total": total, "today": today, "by_stage": by_stage, "by_sector": by_sector, "top_programs": top_programs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/submissions")
+def admin_submissions(pw: str = "", limit: int = 50, offset: int = 0):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        return {"submissions": [], "total": 0}
+    try:
+        conn = _get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT COUNT(*) FROM submissions")
+        total = cur.fetchone()["count"]
+        cur.execute("""
+            SELECT id, startup_name, sector, stage, effective_stage, market_type,
+                   team_size, legal_status, top_program, top_score,
+                   eligible_count, needs, spider_scores, timestamp
+            FROM submissions
+            ORDER BY timestamp DESC
+            LIMIT %s OFFSET %s
+        """, (limit, offset))
+        rows = [dict(r) for r in cur.fetchall()]
+        # Serialize timestamps
+        for r in rows:
+            r["timestamp"] = r["timestamp"].isoformat() if r["timestamp"] else ""
+        cur.close()
+        conn.close()
+        return {"submissions": rows, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/programs")
