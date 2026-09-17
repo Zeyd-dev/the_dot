@@ -42,7 +42,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "thedot2026")
 # ── Database helpers ────────────────────────────────────────────────────────
 
 def _get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
 
 def _ensure_submissions_table():
@@ -273,7 +273,7 @@ def admin_stats(pw: str = ""):
     if pw != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Non autorisé")
     if not DATABASE_URL:
-        return {"total": 0, "today": 0, "by_stage": {}, "by_sector": {}, "top_programs": []}
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
         conn = _get_conn()
         cur = conn.cursor()

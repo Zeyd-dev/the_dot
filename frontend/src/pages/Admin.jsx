@@ -204,9 +204,12 @@ function Dashboard({ pw, onLogout }) {
 
   useEffect(() => {
     fetch(`${API}/api/admin/stats?pw=${encodeURIComponent(pw)}`)
-      .then(r => r.json())
-      .then(setStats)
-      .catch(() => setErr('Impossible de charger les stats'))
+      .then(async r => {
+        const d = await r.json()
+        if (!r.ok) { setErr(`Erreur API: ${d.detail ?? r.status}`); return }
+        setStats(d)
+      })
+      .catch(e => setErr(`Erreur réseau: ${e.message}`))
   }, [pw])
 
   const topStage = stats?.by_stage ? Object.entries(stats.by_stage)[0] : null
