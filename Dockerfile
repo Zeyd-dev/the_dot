@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── React: install packages first (layer cache) ────────────────────────────────
 COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm ci --prefer-offline
+RUN cd frontend && npm install
 
 # ── React: build (output → ./static_frontend/) ────────────────────────────────
 COPY frontend/ ./frontend/
