@@ -57,7 +57,7 @@ MATURITY_DIMS     = ["Team", "Legal", "Product", "Traction", "Funding", "Market"
 MATURITY_DIM_KEYS = ["team", "legal",  "product", "traction", "funding", "market", "branding"]
 
 # ── Groq LLM ──────────────────────────────────────────────────────────────────
-GROQ_MODEL   = "llama-3.1-8b-instant"
+GROQ_MODEL   = "llama3-8b-8192"
 GROQ_TIMEOUT = 15           # seconds — hard cutoff so a slow response never hangs the UI
 
 # ── Ollama LLM ────────────────────────────────────────────────────────────────
