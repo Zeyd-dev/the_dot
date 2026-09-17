@@ -170,6 +170,30 @@ def infer_needs(diag: dict) -> dict:
         if stage in ("seed", "pre-seed"):
             needs.add("hosting")
 
+    # ── IP / competitive advantage ────────────────────────────────────────────
+    has_ip = diag.get("has_ip_protection", False)
+    flags["has_ip"] = has_ip
+    if has_ip:
+        needs.add("ip_protection")
+
+    flags["has_competitive_advantage"] = diag.get("has_competitive_advantage", False)
+    flags["market_size"] = diag.get("market_size", "medium")
+    flags["full_time_count"] = diag.get("full_time_count", diag.get("team_size", 1))
+
+    # ── Business model type ───────────────────────────────────────────────────
+    biz_model_type = diag.get("business_model_type", "")
+    flags["business_model_type"] = biz_model_type
+    if biz_model_type == "saas":
+        needs.update(["tech_support", "acceleration"])
+    elif biz_model_type == "marketplace":
+        needs.update(["market_access", "partnerships"])
+
+    # ── Pitch readiness ───────────────────────────────────────────────────────
+    has_pitch_deck = diag.get("has_pitch_deck", False)
+    flags["has_pitch_deck"] = has_pitch_deck
+    if not has_pitch_deck and funding_need != "none":
+        needs.update(["pitch", "investor_readiness"])
+
     # ── Tech flags ────────────────────────────────────────────────────────
     flags["foreign_entity"] = diag.get("legal_status") == "foreign_entity"
     flags["seeking_vc"]     = diag.get("seeking_investors", False) or funding_need in ("vc", "angel")

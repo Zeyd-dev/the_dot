@@ -65,13 +65,6 @@ OLLAMA_MODEL   = "llama3.2"
 OLLAMA_URL     = "http://localhost:11434/api/generate"
 OLLAMA_TIMEOUT = 90         # seconds
 
-# ── RAG mode (feature/rag-vector-store branch) ────────────────────────────────
-# Set to True to use ChromaDB as the vector store instead of in-memory numpy.
-# Requires: pip install chromadb
-# Build index first: python vector_store.py
-# When False (default), the current in-memory embedding system is used.
-USE_RAG = False
-
 # ── Semantic Embeddings ────────────────────────────────────────────────────────
 # Model: paraphrase-multilingual-MiniLM-L12-v2
 #   - 118 MB, CPU-only, supports French/English/Arabic and 50+ languages

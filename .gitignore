@@ -44,3 +44,14 @@ rapport_the_dot.*
 # Model cache (downloaded automatically by sentence-transformers)
 .cache/
 models/
+
+# React frontend (dev only — not deployed to HuggingFace)
+frontend/
+node_modules/
+
+# Dev / infra files not needed for jury
+api.py
+start_dev.sh
+railway.toml
+TheDot_Guide_Deploiement.pdf
+vector_store.py

@@ -7,16 +7,10 @@ numpy
 
 # ── Visualization ──────────────────────────────────────────────────────────────
 plotly
-chart-studio
 
 # ── LLM / AI ──────────────────────────────────────────────────────────────────
 groq
 sentence-transformers>=2.7.0   # MiniLM-L12-v2 multilingual embeddings (118 MB)
-
-# ── Vector store (optional RAG mode) ──────────────────────────────────────────
-# Only needed if USE_RAG=True in config.py or toggled on in Admin settings.
-# Comment out if you don't need ChromaDB to keep the install lighter.
-chromadb>=0.5.0
 
 # ── Database ───────────────────────────────────────────────────────────────────
 psycopg2-binary                 # PostgreSQL driver for Supabase

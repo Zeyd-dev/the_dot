@@ -24,12 +24,14 @@ def spider_score(dim: str, diag: dict, effective_stage: str) -> int:
         team_size          = diag.get("team_size", 1)
         has_tech_cofounder = diag.get("has_tech_cofounder", False)
         has_biz_cofounder  = diag.get("has_business_cofounder", False)
+        full_time_count    = diag.get("full_time_count", team_size)  # new field
+        full_time_bonus = 10 if full_time_count >= 2 else 0
         if team_size >= 3 and has_tech_cofounder and has_biz_cofounder:
-            return 100
+            return min(100, 90 + full_time_bonus)
         if team_size >= 2 and (has_tech_cofounder or has_biz_cofounder):
-            return 65
+            return min(100, 60 + full_time_bonus)
         if team_size >= 2:
-            return 40
+            return min(100, 35 + full_time_bonus)
         return 20
 
     # ── Legal ─────────────────────────────────────────────────────────────────
@@ -48,12 +50,14 @@ def spider_score(dim: str, diag: dict, effective_stage: str) -> int:
 
     # ── Product ───────────────────────────────────────────────────────────────
     if dim == "product":
+        has_ip = diag.get("has_ip_protection", False)  # new field
+        ip_bonus = 10 if has_ip else 0
         if diag.get("has_revenue"):
-            return 100
+            return min(100, 90 + ip_bonus)
         if diag.get("has_customers"):
-            return 80
+            return min(100, 72 + ip_bonus)
         if diag.get("has_product"):
-            return 55
+            return min(100, 50 + ip_bonus)
         if effective_stage == "pre-seed":
             return 30
         return 10
@@ -89,15 +93,19 @@ def spider_score(dim: str, diag: dict, effective_stage: str) -> int:
     # ── Market ────────────────────────────────────────────────────────────────
     if dim == "market":
         market_type = diag.get("market_type", "local")
+        market_size = diag.get("market_size", "medium")  # new field: small/medium/large
+        has_competitive_adv = diag.get("has_competitive_advantage", False)  # new field
+        size_bonus = {"large": 15, "medium": 8, "small": 0}.get(market_size, 8)
+        adv_bonus = 10 if has_competitive_adv else 0
         if market_type == "international" and diag.get("has_revenue"):
-            return 90
+            return min(100, 78 + size_bonus // 2)
         if market_type == "regional":
-            return 65
+            return min(100, 55 + size_bonus // 2 + adv_bonus // 2)
         if market_type == "international":
-            return 55
+            return min(100, 45 + size_bonus // 2)
         if diag.get("has_customers"):
-            return 50
-        return 25
+            return min(100, 42 + adv_bonus // 2)
+        return min(100, 22 + adv_bonus // 2)
 
     # ── Branding ──────────────────────────────────────────────────────────────
     if dim == "branding":

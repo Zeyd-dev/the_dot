@@ -110,11 +110,11 @@ st.markdown("""
   <a href="/" class="back-link" target="_self">← Accueil</a>
   <div class="hero-eyebrow">The Dot — Tunisia's Leading Startup Hub</div>
   <h1 class="hero-title">Find your <span>exact</span> fit<br>in The Dot ecosystem</h1>
-  <p class="hero-sub">Answer 6 sections about your startup. Get a personalised radar, strategic advice, and ranked program recommendations — powered by AI.</p>
+  <p class="hero-sub">Répondez à 7 sections sur votre startup. Obtenez un radar de maturité personnalisé, des conseils stratégiques et un classement des programmes — propulsé par l'IA.</p>
   <div class="hero-meta">
-    <div class="hero-stat"><span class="hero-stat-val">8</span><span class="hero-stat-label">Programs analysed</span></div>
-    <div class="hero-stat"><span class="hero-stat-val">7</span><span class="hero-stat-label">Maturity dimensions</span></div>
-    <div class="hero-stat"><span class="hero-stat-val">~3s</span><span class="hero-stat-label">AI matching time</span></div>
+    <div class="hero-stat"><span class="hero-stat-val">9</span><span class="hero-stat-label">Programmes analysés</span></div>
+    <div class="hero-stat"><span class="hero-stat-val">7</span><span class="hero-stat-label">Dimensions de maturité</span></div>
+    <div class="hero-stat"><span class="hero-stat-val">~3s</span><span class="hero-stat-label">Temps d'analyse IA</span></div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -126,96 +126,136 @@ st.markdown('<div class="form-wrap">', unsafe_allow_html=True)
 # Progress bar — shows 6 neutral section indicators (not fake "done" states).
 st.markdown("""
 <div class="progress-wrap">
-  <span class="progress-label">6 sections to complete</span>
+  <span class="progress-label">7 sections à remplir</span>
   <div class="progress-steps">
     <div class="progress-step"></div><div class="progress-step"></div>
     <div class="progress-step"></div><div class="progress-step"></div>
     <div class="progress-step"></div><div class="progress-step"></div>
+    <div class="progress-step"></div>
   </div>
-  <span class="progress-label" style="color:#60a5fa;">~3 min</span>
+  <span class="progress-label" style="color:#60a5fa;">~4 min</span>
 </div>
 """, unsafe_allow_html=True)
 
 with st.form("diagnostic_form"):
-    st.markdown('<div class="form-section"><div class="form-section-title">🏢 1 / 6 — Startup Identity</div>', unsafe_allow_html=True)
+    # ── Section 1: Startup Identity ──────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">🏢 1 / 7 — Identité de la Startup</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
-        startup_name = st.text_input("Startup name *", placeholder="e.g. Agritech Tunisia", max_chars=80)
-        sector = st.selectbox("Sector", ["tech","fintech","healthtech","edtech","agritech","cleantech","commerce","industry","manufacturing","retail","saas","marketplace","other"])
+        startup_name = st.text_input("Nom de la startup *", placeholder="ex. Agritech Tunisia", max_chars=80)
+        sector = st.selectbox("Secteur d'activité", ["tech","fintech","healthtech","edtech","agritech","cleantech","commerce","industry","manufacturing","retail","saas","marketplace","other"],
+            format_func=lambda x: {"tech":"Tech / Digital","fintech":"Fintech","healthtech":"Healthtech / MedTech","edtech":"Edtech","agritech":"Agritech","cleantech":"Cleantech / GreenTech","commerce":"Commerce / Retail","industry":"Industrie","manufacturing":"Manufacturing","retail":"Retail","saas":"SaaS","marketplace":"Marketplace","other":"Autre"}[x])
     with c2:
-        business_model = st.selectbox("Business model", ["b2c","b2b","b2b2c","marketplace","other"])
-        market_type = st.selectbox("Target market", ["local","regional","international"])
-    c1, c2 = st.columns(2)
-    with c1: diaspora_founder = st.checkbox("👋 I am a Tunisian diaspora entrepreneur")
-    with c2: outside_tunis = st.checkbox("📍 My startup is based outside the major coastal hubs (Tunis, Sousse, Sfax, Médenine)")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="form-section"><div class="form-section-title">📈 2 / 6 — Stage & Maturity</div>', unsafe_allow_html=True)
+        business_model = st.selectbox("Modèle économique (relations)", ["b2c","b2b","b2b2c","marketplace","other"],
+            format_func=lambda x: {"b2c":"B2C (grand public)","b2b":"B2B (entreprises)","b2b2c":"B2B2C","marketplace":"Marketplace","other":"Autre / Mixte"}[x])
+        business_model_type = st.selectbox("Type de modèle", ["saas","service","product","marketplace","other"],
+            format_func=lambda x: {"saas":"SaaS (abonnement)","service":"Service / Conseil","product":"Produit physique","marketplace":"Marketplace / Plateforme","other":"Autre / Mixte"}[x])
     c1, c2 = st.columns(2)
     with c1:
-        stage = st.selectbox("Current stage", ["ideation","pre-seed","seed","growth","scale"],
-            help="ideation=idea only | pre-seed=building MVP | seed=have product | growth=revenue+scaling | scale=new markets")
+        market_type = st.selectbox("Marché cible", ["local","regional","international"],
+            format_func=lambda x: {"local":"Local (Tunisie)","regional":"Régional (Maghreb/Afrique)","international":"International (Europe/Monde)"}[x])
+        market_size = st.selectbox("Taille de marché estimée", ["small","medium","large"],
+            format_func=lambda x: {"small":"Petit (< 1M TND)","medium":"Moyen (1M–50M TND)","large":"Grand (> 50M TND)"}[x])
     with c2:
-        st.caption("💡 ideation → 🔨 pre-seed → 🌱 seed → 📊 growth → 🚀 scale")
-    c1, c2, c3 = st.columns(3)
-    with c1: has_product = st.checkbox("We have a product / MVP")
-    with c2: has_customers = st.checkbox("We have paying / active customers")
-    with c3: has_revenue = st.checkbox("We are generating revenue")
+        diaspora_founder = st.checkbox("👋 Je suis un entrepreneur de la diaspora tunisienne")
+        outside_tunis = st.checkbox("📍 Startup basée hors des grands hubs côtiers (hors Tunis, Sousse, Sfax, Médenine)")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="form-section"><div class="form-section-title">👥 3 / 6 — Team</div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1: team_size = st.number_input("Number of founders", min_value=1, max_value=10, value=1)
-    with c2: has_tech_cofounder = st.checkbox("We have a technical co-founder / CTO")
-    with c3: has_business_cofounder = st.checkbox("We have a business co-founder / commercial lead")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="form-section"><div class="form-section-title">⚖️ 4 / 6 — Legal Status</div>', unsafe_allow_html=True)
+    # ── Section 2: Stage & Maturity ──────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">📈 2 / 7 — Stade & Maturité</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
-        legal_status = st.selectbox("Incorporation status", [
+        stage = st.selectbox("Stade actuel", ["ideation","pre-seed","seed","growth","scale"],
+            format_func=lambda x: {"ideation":"💡 Idéation (concept)","pre-seed":"🔨 Pré-seed (construction MVP)","seed":"🌱 Seed (produit validé)","growth":"📊 Croissance (revenus)","scale":"🚀 Scale (nouveaux marchés)"}[x])
+    with c2:
+        st.caption("Choisissez le stade qui correspond réellement à votre situation actuelle.")
+    c1, c2, c3 = st.columns(3)
+    with c1: has_product = st.checkbox("✅ Nous avons un produit / MVP")
+    with c2: has_customers = st.checkbox("✅ Nous avons des clients actifs ou payants")
+    with c3: has_revenue = st.checkbox("✅ Nous générons du chiffre d'affaires")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Section 3: Team ──────────────────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">👥 3 / 7 — Équipe</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        team_size = st.number_input("Nombre de fondateurs", min_value=1, max_value=20, value=1)
+        full_time_count = st.number_input("Personnes dédiées à 100%", min_value=0, max_value=20, value=1,
+            help="Nombre de personnes consacrées à 100% au projet (fondateurs inclus)")
+    with c2:
+        has_tech_cofounder = st.checkbox("Nous avons un co-fondateur technique / CTO")
+        has_business_cofounder = st.checkbox("Nous avons un co-fondateur commercial / business lead")
+    with c3:
+        has_competitive_advantage = st.checkbox("Nous avons un avantage concurrentiel identifié",
+            help="Technologie propriétaire, brevet, réseau exclusif, position de marché différenciée…")
+        has_ip_protection = st.checkbox("Technologie brevetée ou propriété intellectuelle protégée")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Section 4: Legal Status ──────────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">⚖️ 4 / 7 — Statut Juridique</div>', unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        legal_status = st.selectbox("Statut de constitution", [
             "not_incorporated","in_progress","incorporated_suarl","incorporated_sarl","incorporated_sa","foreign_entity"
         ], format_func=lambda x: {
-            "not_incorporated": "❌ Not yet incorporated",
-            "in_progress": "⏳ Incorporation in progress",
-            "incorporated_suarl": "✅ Incorporated — SUARL",
-            "incorporated_sarl": "✅ Incorporated — SARL",
-            "incorporated_sa": "✅ Incorporated — SA",
-            "foreign_entity": "🌍 Foreign entity entering Tunisia",
+            "not_incorporated": "❌ Non encore constitué",
+            "in_progress": "⏳ Constitution en cours",
+            "incorporated_suarl": "✅ Constitué — SUARL",
+            "incorporated_sarl": "✅ Constitué — SARL",
+            "incorporated_sa": "✅ Constitué — SA",
+            "foreign_entity": "🌍 Entité étrangère (implantation en Tunisie)",
         }[x])
     with c2:
-        has_startup_label = st.checkbox("We hold the Startup Act label")
-        has_branding = st.checkbox("We have an established brand identity")
+        has_startup_label = st.checkbox("🏷️ Nous détenons le label Startup Act")
+        has_branding = st.checkbox("🎨 Nous avons une identité de marque établie")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="form-section"><div class="form-section-title">💰 5 / 6 — Funding</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        funding_need = st.selectbox("Funding type sought", ["none","grant","angel","vc","institutional"],
-            format_func=lambda x: {"none":"Not currently fundraising","grant":"Public grants / SICAR","angel":"Business angels","vc":"Venture capital","institutional":"Institutional / PE funds"}[x])
-    with c2:
-        funding_range = st.selectbox("Amount needed (TND)", ["none","under_50k","50k_200k","200k_1m","above_1m"],
-            format_func=lambda x: {"none":"—","under_50k":"< 50,000 TND","50k_200k":"50,000–200,000 TND","200k_1m":"200,000–1,000,000 TND","above_1m":"> 1,000,000 TND"}[x])
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="form-section"><div class="form-section-title">🎯 6 / 6 — Tech Profile & Additional Needs</div>', unsafe_allow_html=True)
+    # ── Section 5: Funding ───────────────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">💰 5 / 7 — Financement</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1:
-        is_ai_startup = st.checkbox("We build AI / ML solutions")
-        is_industry40 = st.checkbox("Industry 4.0 / IoT / Manufacturing")
-        is_mobile_focused = st.checkbox("Mobile-first solution")
+        funding_need = st.selectbox("Type de financement recherché", ["none","grant","angel","vc","institutional"],
+            format_func=lambda x: {"none":"Pas de recherche active","grant":"Subventions publiques / SICAR","angel":"Business angels","vc":"Capital-risque (VC)","institutional":"Institutionnel / PE"}[x])
     with c2:
-        needs_workspace = st.checkbox("Need workspace / office")
-        needs_content_production = st.checkbox("Need design / studio tools")
-        needs_events_space = st.checkbox("Need event / conference space")
+        funding_range = st.selectbox("Montant recherché (TND)", ["none","under_50k","50k_200k","200k_1m","above_1m"],
+            format_func=lambda x: {"none":"—","under_50k":"< 50 000 TND","50k_200k":"50 000–200 000 TND","200k_1m":"200 000–1 000 000 TND","above_1m":"> 1 000 000 TND"}[x])
     with c3:
-        needs_mentorship = st.checkbox("Seeking mentor / senior advisor")
-        needs_market_access = st.checkbox("Need help accessing markets")
-        seeking_investors = st.checkbox("Actively seeking investor introductions")
+        has_pitch_deck = st.checkbox("📊 Nous avons un pitch deck investisseurs",
+            help="Présentation préparée pour des comités d'investissement")
+        seeking_investors = st.checkbox("🤝 Nous cherchons activement des introductions investisseurs")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Section 6: Tech Profile ──────────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">🔬 6 / 7 — Profil Technologique</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        is_ai_startup = st.checkbox("🤖 Nous développons des solutions IA / ML")
+        is_industry40 = st.checkbox("🏭 Industrie 4.0 / IoT / Manufacturing")
+        is_mobile_focused = st.checkbox("📱 Solution mobile-first")
+    with c2:
+        needs_workspace = st.checkbox("🏢 Besoin d'espace de travail / bureau")
+        needs_content_production = st.checkbox("🎬 Besoin de design / studio")
+        needs_events_space = st.checkbox("🎤 Besoin d'espace événementiel")
+    with c3:
+        needs_mentorship = st.checkbox("🧠 En recherche de mentor / conseiller senior")
+        needs_market_access = st.checkbox("🌍 Besoin d'accès aux marchés")
+        needs_legal_expert = st.checkbox("⚖️ Besoin d'expertise juridique / fiscale",
+            help="Structuration juridique, pacte d'associés, IP, fiscalité startup")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Section 7: Value Proposition ────────────────────────────────────────
+    st.markdown('<div class="form-section"><div class="form-section-title">💡 7 / 7 — Proposition de Valeur</div>', unsafe_allow_html=True)
+    value_proposition = st.text_area(
+        "Décrivez votre startup en 2–3 phrases (optionnel)",
+        placeholder="Ex: SaisIAR automatise la saisie comptable via IA. Notre moteur propriétaire traite factures et relevés bancaires sans dépendance externe, garantissant confidentialité et conformité PCG tunisien.",
+        max_chars=500,
+        height=80,
+        help="Cette description améliore la précision du matching sémantique IA"
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="form-footer">', unsafe_allow_html=True)
-    submitted = st.form_submit_button("🔍  Analyse My Startup & Find Resources")
+    submitted = st.form_submit_button("🔍  Analyser Ma Startup & Trouver les Programmes")
     st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('</div>', unsafe_allow_html=True)
@@ -226,7 +266,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 if submitted:
     # ── Form validation ───────────────────────────────────────────────────
     if not startup_name or not startup_name.strip():
-        st.error("⚠️ Please enter your startup name before submitting.")
+        st.error("⚠️ Veuillez saisir le nom de votre startup avant de soumettre.")
         st.stop()
 
     name_display = startup_name.strip()[:80]
@@ -238,14 +278,19 @@ if submitted:
 
     diag = {
         "startup_name": name_display, "stage": stage, "sector": sector,
-        "business_model": business_model, "market_type": market_type,
+        "business_model": business_model, "business_model_type": business_model_type,
+        "market_type": market_type, "market_size": market_size,
         "diaspora_founder": diaspora_founder, "outside_tunis": outside_tunis,
-        "team_size": team_size, "has_tech_cofounder": has_tech_cofounder,
+        "team_size": team_size, "full_time_count": full_time_count,
+        "has_tech_cofounder": has_tech_cofounder,
         "has_business_cofounder": has_business_cofounder,
+        "has_competitive_advantage": has_competitive_advantage,
+        "has_ip_protection": has_ip_protection,
         "legal_status": legal_status, "has_startup_label": has_startup_label,
         "has_branding": has_branding, "has_product": has_product,
         "has_customers": has_customers, "has_revenue": has_revenue,
         "funding_need": funding_need, "funding_range": funding_range,
+        "has_pitch_deck": has_pitch_deck,
         "is_ai_startup": is_ai_startup, "is_industry40": is_industry40,
         "is_mobile_focused": is_mobile_focused,
         "needs_workspace": needs_workspace,
@@ -253,7 +298,9 @@ if submitted:
         "needs_events_space": needs_events_space,
         "needs_mentorship": needs_mentorship,
         "needs_market_access": needs_market_access,
+        "needs_legal_expert": needs_legal_expert,
         "seeking_investors": seeking_investors,
+        "value_proposition": value_proposition or "",
     }
 
     profile = infer_needs(diag)
@@ -270,6 +317,9 @@ if submitted:
     if outside_tunis:             extra += ["regional_support"]
     if legal_status in ("not_incorporated","in_progress"): extra += ["legal","incorporation","legal_structuring"]
     if market_type in ("regional","international"):        extra += ["market_access"]
+    if needs_legal_expert:        extra += ["legal_structuring","fiscal","incorporation","coaching"]
+    if has_ip_protection:         extra += ["ip_protection"]
+    if not has_pitch_deck and funding_need != "none": extra += ["pitch","investor_readiness"]
     profile["needs"]         = list(set(profile.get("needs", [])) | set(extra))
     profile["diaspora"]      = diaspora_founder
     profile["outside_tunis"] = outside_tunis
@@ -277,6 +327,7 @@ if submitted:
     profile["seeking_vc"]    = seeking_investors or funding_need in ("vc","angel")
     profile["is_ai"]         = is_ai_startup
     profile["is_industry40"] = is_industry40
+    profile["has_ip"]        = has_ip_protection
 
     effective_stage = profile.get("stage", stage)
 
@@ -478,28 +529,32 @@ grid:{{color:'rgba(255,255,255,0.07)'}},angleLines:{{color:'rgba(255,255,255,0.0
 
     # Results cards
     ai_label = " &nbsp;<span style='font-size:0.68rem;background:#eff6ff;color:#1d4ed8;padding:2px 10px;border-radius:20px;font-weight:600;'>⚡ AI-powered</span>" if llm_powered else ""
-    st.markdown(f'<div class="section-label">Recommended Programs — {len(results)} matches{ai_label}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-label">Programmes Recommandés — {len(results)} correspondances{ai_label}</div>', unsafe_allow_html=True)
 
     def build_eligibility_checklist(r, diag, profile, effective_stage):
         checks = []
         rid = r.get("id","")
         incorporated = diag.get("legal_status","") not in ("not_incorporated","in_progress")
         resource_stages = r.get("stages_raw", [effective_stage])
-        checks.append((effective_stage in resource_stages, f"Stage ({effective_stage}) matches programme"))
+        checks.append((effective_stage in resource_stages, f"Stade ({effective_stage}) compatible"))
         if rid == "R001":
-            checks += [(diag.get("has_product",False),"Has working MVP"),(incorporated,"Legally incorporated"),(not diag.get("outside_tunis",False),"Based in / able to relocate to Tunis")]
+            checks += [(diag.get("has_product",False),"A un MVP fonctionnel"),(incorporated,"Juridiquement constitué"),(not diag.get("outside_tunis",False),"Basé à / peut se relocaliser à Tunis")]
         elif rid == "R002":
-            checks += [(diag.get("outside_tunis",False),"Based outside major coastal hubs"),(not diag.get("has_revenue",False),"Not yet generating revenue")]
+            checks += [(diag.get("outside_tunis",False),"Basé hors des grands hubs côtiers"),(not diag.get("has_revenue",False),"Pas encore en phase de revenus")]
         elif rid == "R003":
-            checks.append((diag.get("diaspora_founder",False),"Tunisian diaspora founder"))
+            checks.append((diag.get("diaspora_founder",False),"Fondateur de la diaspora tunisienne"))
         elif rid == "R004":
-            checks += [(diag.get("has_product",False),"Has product to advise on"),(effective_stage in ("seed","growth","scale"),"Seed stage or beyond")]
+            checks += [(diag.get("has_product",False),"A un produit à challenger"),(effective_stage in ("seed","growth","scale"),"Stade Seed ou au-delà")]
+        elif rid == "R005":
+            checks += [(True,"Accessible à tous les stades"),(True,"Aucun prérequis — session à la demande")]
+        elif rid == "R006":
+            checks.append((True,"Accessible à tous les stades"))
         elif rid == "R007":
-            checks += [(diag.get("is_ai_startup",False),"AI / ML core product"),(diag.get("has_product",False),"Has working MVP"),(incorporated,"Legally incorporated")]
+            checks.append((True,"Membre de la communauté The Dot"))
         elif rid == "R008":
-            checks += [(diag.get("sector","") in ("tech","saas"),"Tech or SaaS sector"),(incorporated,"Legally incorporated"),(effective_stage in ("seed","growth","scale"),"Seed stage or beyond")]
-        elif rid in ("R005","R006"):
-            checks.append((True,"Open to all stages"))
+            checks += [(diag.get("is_ai_startup",False),"Produit IA / ML core"),(diag.get("has_product",False),"A un MVP fonctionnel"),(incorporated,"Juridiquement constitué")]
+        elif rid == "R009":
+            checks += [(diag.get("sector","") in ("tech","saas"),"Secteur Tech ou SaaS"),(incorporated,"Juridiquement constitué"),(effective_stage in ("seed","growth","scale"),"Stade Seed ou au-delà")]
         met = sum(1 for ok,_ in checks if ok)
         total = len(checks)
         pct = int((met/total)*100) if total else 0
@@ -515,15 +570,45 @@ grid:{{color:'rgba(255,255,255,0.07)'}},angleLines:{{color:'rgba(255,255,255,0.0
         return (
             f'<div style="margin-top:0.85rem;padding:0.75rem 1rem;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.08);">'
             f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
-            f'<span style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.25);letter-spacing:0.07em;text-transform:uppercase;">Eligibility</span>'
+            f'<span style="font-size:0.7rem;font-weight:700;color:rgba(255,255,255,0.25);letter-spacing:0.07em;text-transform:uppercase;">Éligibilité</span>'
             f'<span style="font-size:0.72rem;font-weight:600;color:{bar_color};">{met}/{total} criteria met</span></div>'
             f'<div style="background:rgba(255,255,255,0.08);border-radius:4px;height:4px;margin-bottom:8px;">'
             f'<div style="background:{bar_color};border-radius:4px;height:4px;width:{pct}%;"></div></div>'
             f'<div style="flex-wrap:wrap;">{items_html}</div></div>'
         )
 
+    def _program_meta_strip(r):
+        """Render duration / key_benefit / deliverables / ideal_profile strips."""
+        duration    = r.get("duration", "")
+        key_benefit = r.get("key_benefit", "")
+        deliverables = r.get("deliverables", "")
+        ideal_profile = r.get("eligibility_criteria", "")  # mapped from ideal_profile column
+        if not any([duration, key_benefit, deliverables, ideal_profile]):
+            return ""
+        parts = []
+        if duration:
+            parts.append(f'<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.73rem;color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px 10px;">⏱ {duration}</span>')
+        if key_benefit:
+            parts.append(f'<span style="display:inline-flex;align-items:center;gap:5px;font-size:0.73rem;color:#86efac;background:rgba(22,163,74,0.1);border:1px solid rgba(74,222,128,0.2);border-radius:8px;padding:4px 10px;">⭐ {key_benefit}</span>')
+        meta_html = f'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:0.75rem;">{"".join(parts)}</div>' if parts else ""
+        if ideal_profile:
+            meta_html += (
+                f'<div style="margin-bottom:0.65rem;padding:0.55rem 0.85rem;background:rgba(99,102,241,0.07);'
+                f'border-radius:8px;border:1px solid rgba(99,102,241,0.18);">'
+                f'<span style="font-size:0.62rem;font-weight:700;letter-spacing:0.08em;color:rgba(255,255,255,0.22);text-transform:uppercase;">Pour qui ?</span>'
+                f'<br><span style="font-size:0.78rem;color:rgba(255,255,255,0.5);line-height:1.5;">{ideal_profile}</span></div>'
+            )
+        if deliverables:
+            meta_html += (
+                f'<div style="margin-bottom:0.75rem;padding:0.6rem 0.9rem;background:rgba(37,99,235,0.07);'
+                f'border-radius:8px;border:1px solid rgba(37,99,235,0.15);">'
+                f'<span style="font-size:0.62rem;font-weight:700;letter-spacing:0.07em;color:rgba(255,255,255,0.22);text-transform:uppercase;">Ce que vous obtenez</span>'
+                f'<br><span style="font-size:0.78rem;color:rgba(255,255,255,0.55);line-height:1.5;">{deliverables}</span></div>'
+            )
+        return meta_html
+
     if not results:
-        st.info("No strong matches found — try adjusting your answers.")
+        st.info("Aucune correspondance forte trouvée — essayez d'ajuster vos réponses.")
     else:
         for i, r in enumerate(results):
             sc = min(r["score"], 100)
@@ -566,12 +651,13 @@ grid:{{color:'rgba(255,255,255,0.07)'}},angleLines:{{color:'rgba(255,255,255,0.0
   <div style="background:#1a2744;border-radius:4px;height:5px;margin:0.8rem 0;overflow:hidden;">
     <div style="background:{bar_color};border-radius:4px;height:5px;width:{sc}%;"></div>
   </div>
-  <p style="font-size:0.85rem;color:rgba(255,255,255,0.45);margin:0 0 0.6rem 0;line-height:1.55;">{r['description']}</p>
-  <div style="margin-bottom:2px;">{reasons_html}</div>
+  <p style="font-size:0.85rem;color:rgba(255,255,255,0.45);margin:0 0 0.75rem 0;line-height:1.55;">{r['description']}</p>
+  {_program_meta_strip(r)}
+  <div style="margin-bottom:6px;">{reasons_html}</div>
   {advice_html}{checklist_html}
   <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid #1a2744;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
-    <a href="{r['url']}" target="_blank" style="font-size:0.8rem;color:rgba(255,255,255,0.3);text-decoration:none;font-weight:500;">Learn more →</a>
-    <a href="{apply_url}" target="_blank" style="font-size:0.82rem;font-weight:700;color:white;background:linear-gradient(135deg,#1d4ed8,#2563eb);border-radius:8px;padding:7px 18px;text-decoration:none;box-shadow:0 2px 10px rgba(37,99,235,0.4);">Apply now →</a>
+    <a href="{r['url']}" target="_blank" style="font-size:0.8rem;color:rgba(255,255,255,0.3);text-decoration:none;font-weight:500;">En savoir plus →</a>
+    <a href="{apply_url}" target="_blank" style="font-size:0.82rem;font-weight:700;color:white;background:linear-gradient(135deg,#1d4ed8,#2563eb);border-radius:8px;padding:7px 18px;text-decoration:none;box-shadow:0 2px 10px rgba(37,99,235,0.4);">Postuler →</a>
   </div>
   <div style="margin-top:1.5rem;padding-top:1.25rem;border-top:1px dashed #1a2744;">
     <div style="background:linear-gradient(160deg,#0a1628 0%,#0f2557 100%);border-radius:12px;padding:1.25rem;">
@@ -593,7 +679,8 @@ grid:{{color:'rgba(255,255,255,0.07)'}},angleLines:{{color:'rgba(255,255,255,0.0
   pointLabels:{{font:{{size:9,family:'DM Sans',weight:'600'}},color:'rgba(255,255,255,0.7)'}},
   grid:{{color:'rgba(255,255,255,0.06)'}},angleLines:{{color:'rgba(255,255,255,0.06)'}}}}}}}}}}); }},50); }})();
 </script>"""
-            h = 260 + len(r.get("reasons",[])) * 32 + (85 if r.get("advice") else 0) + (n_checks * 34) + 420
+            ideal_len = len(r.get("eligibility_criteria",""))
+            h = 260 + len(r.get("reasons",[])) * 32 + (85 if r.get("advice") else 0) + (n_checks * 34) + 420 + (80 if ideal_len > 0 else 0) + min(ideal_len // 80 * 20, 120)
             components.html(card, height=h, scrolling=False)
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)

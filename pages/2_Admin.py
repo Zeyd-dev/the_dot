@@ -678,70 +678,24 @@ if is_admin():
 **ChromaDB (ON)** = similarité cosine pure → rapide sur grand catalogue, perd la logique métier dans le score
         """)
 
-    # ── RAG toggle (outside form so it controls show/hide immediately) ───────
-    _rag_available = False
-    _idx_ok = False
-    try:
-        from vector_store import index_exists, build_index
-        from matcher import load_resources as _lr
-        _rag_available = True
-        _idx_ok = index_exists()
-    except Exception:
-        pass
-
-    use_rag = st.toggle(
-        "Activer la base de données vectorielle (RAG)",
-        value=current.get("use_rag", False),
-        disabled=not _rag_available,
-        key="use_rag_toggle",
-        help=(
-            "OFF : score hybride = 0.6 × règles métier + 0.4 × sémantique — recommandé < 50 programmes. "
-            "ON : recherche vectorielle ANN (ChromaDB) — recommandé 50+ programmes."
-        ),
-    )
-
-    if not _rag_available:
-        st.caption("ℹ️ Module vectoriel non disponible sur cette installation.")
-
-    # ── Show ChromaDB section only when RAG is ON ─────────────────────────────
-    if use_rag:
-        st.markdown("##### Base vectorielle ChromaDB")
-        col_rag_a, col_rag_b = st.columns([3, 1])
-        with col_rag_a:
-            if _idx_ok:
-                st.success("✅ Index vectoriel disponible et à jour.")
-            else:
-                st.warning("⚠️ Index non initialisé — le moteur ne peut pas utiliser ChromaDB.")
-        with col_rag_b:
-            if st.button("⚡ Initialiser / Mettre à jour", use_container_width=True):
-                with st.spinner("Construction de la base vectorielle…"):
-                    build_index(_lr(), force=True)
-                st.success("✅ Base vectorielle construite !")
-                st.rerun()
-
     with st.form("engine_settings_form"):
-        # ── Show hybrid sliders only when RAG is OFF ──────────────────────────
-        if not use_rag:
-            st.markdown("##### Pondération du matching")
-            col1, col2 = st.columns(2)
-            with col1:
-                rule_w = st.slider(
-                    "Priorité aux critères métier",
-                    min_value=0.0, max_value=1.0, step=0.05,
-                    value=float(current.get("rule_weight", 0.6)),
-                    help="Part des règles métier (stade, besoins, secteur) dans le score.",
-                )
-            with col2:
-                sem_w = st.slider(
-                    "Priorité à la compréhension du contexte (IA)",
-                    min_value=0.0, max_value=1.0, step=0.05,
-                    value=float(current.get("semantic_weight", 0.4)),
-                    help="Part de l'analyse sémantique IA dans le score.",
-                )
-            st.caption(f"Total : {round(rule_w + sem_w, 2)} (idéalement = 1.0)")
-        else:
-            rule_w = float(current.get("rule_weight", 0.6))
-            sem_w  = float(current.get("semantic_weight", 0.4))
+        st.markdown("##### Pondération du matching")
+        col1, col2 = st.columns(2)
+        with col1:
+            rule_w = st.slider(
+                "Priorité aux critères métier",
+                min_value=0.0, max_value=1.0, step=0.05,
+                value=float(current.get("rule_weight", 0.6)),
+                help="Part des règles métier (stade, besoins, secteur) dans le score.",
+            )
+        with col2:
+            sem_w = st.slider(
+                "Priorité à la compréhension du contexte (IA)",
+                min_value=0.0, max_value=1.0, step=0.05,
+                value=float(current.get("semantic_weight", 0.4)),
+                help="Part de l'analyse sémantique IA dans le score.",
+            )
+        st.caption(f"Total : {round(rule_w + sem_w, 2)} (idéalement = 1.0)")
 
         st.markdown("##### Paramètres LLM")
         col3, col4 = st.columns(2)
@@ -764,7 +718,6 @@ if is_admin():
         with col_save:
             if st.form_submit_button("💾 Enregistrer les paramètres", use_container_width=True):
                 _settings.save({
-                    "use_rag":             use_rag,
                     "rule_weight":         rule_w,
                     "semantic_weight":     sem_w,
                     "llm_candidate_limit": cand_limit,

@@ -17,7 +17,6 @@ import os
 from pathlib import Path
 
 from config import (
-    USE_RAG            as _DEFAULT_USE_RAG,
     RULE_WEIGHT        as _DEFAULT_RULE_WEIGHT,
     SEMANTIC_WEIGHT    as _DEFAULT_SEMANTIC_WEIGHT,
     LLM_CANDIDATE_LIMIT as _DEFAULT_LLM_CANDIDATE_LIMIT,
@@ -27,7 +26,6 @@ from config import (
 SETTINGS_PATH = Path(__file__).parent / "settings.json"
 
 DEFAULTS: dict = {
-    "use_rag":              _DEFAULT_USE_RAG,
     "rule_weight":          _DEFAULT_RULE_WEIGHT,
     "semantic_weight":      _DEFAULT_SEMANTIC_WEIGHT,
     "llm_candidate_limit":  _DEFAULT_LLM_CANDIDATE_LIMIT,

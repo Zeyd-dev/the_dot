@@ -20,7 +20,23 @@ import json
 import os
 
 import pandas as pd
-import streamlit as st
+
+# Streamlit cache is optional — when matcher.py is imported by FastAPI (api.py),
+# st is unavailable.  We fall back to a no-op decorator so the functions work
+# identically without caching.
+try:
+    import streamlit as st
+    _cache = st.cache_data(show_spinner=False)
+except Exception:
+    def _cache(fn=None, **_kw):
+        if fn is None:
+            return lambda f: f
+        return fn
+    class _StStub:
+        @staticmethod
+        def cache_data(show_spinner=False):
+            return _cache
+    st = _StStub()
 
 _ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 try:
@@ -90,12 +106,15 @@ def load_resources(path: str = "resources.csv") -> pd.DataFrame:
     for col in list_cols:
         if col in df.columns:
             df[col] = df[col].apply(lambda x: [s.strip() for s in str(x).split(",")])
-    if "diaspora_only" in df.columns:
-        df["diaspora_only"] = df["diaspora_only"].astype(str).str.lower() == "true"
-    if "outside_hub_only" in df.columns:
-        df["outside_hub_only"] = df["outside_hub_only"].astype(str).str.lower() == "true"
-    if "international_focus" in df.columns:
-        df["international_focus"] = df["international_focus"].astype(str).str.lower() == "true"
+    for bool_col in ("diaspora_only", "outside_hub_only", "international_focus"):
+        if bool_col in df.columns:
+            df[bool_col] = df[bool_col].astype(str).str.lower() == "true"
+    # Fill optional enrichment columns added in v2
+    for opt_col in ("duration", "deliverables", "key_benefit", "ideal_profile"):
+        if opt_col not in df.columns:
+            df[opt_col] = ""
+        else:
+            df[opt_col] = df[opt_col].fillna("")
     return df
 
 
@@ -144,6 +163,18 @@ def rule_based_score(resource: pd.Series, profile: dict) -> tuple:
     if profile.get("legal_gap") and any(n in resource["needs"] for n in ["legal_structuring", "incorporation", "fiscal"]):
         score += 15
         reasons.append("Directly addresses your legal gap (priority blocker)")
+
+    # Dot Expert bonus — very relevant for legal/financial needs at any stage
+    if resource.get("id") == "R005":
+        if profile.get("legal_gap"):
+            score += 20
+            reasons.append("Certified expert can guide your legal structuring immediately")
+        if profile.get("needs_funding") and profile.get("seeking_vc"):
+            score += 20
+            reasons.append("Expert pitch review and fundraising strategy sessions available")
+        if profile.get("has_ip"):
+            score += 10
+            reasons.append("IP protection and patent advice available through expert sessions")
 
     if profile.get("needs_funding") and any(n in resource["needs"] for n in ["fundraising", "investment_readiness", "vc_access"]):
         score += 15
@@ -350,19 +381,9 @@ def match(profile: dict, resources_path: str = "resources.csv", top_n: int = 8, 
     resource_lookup = {row["id"]: row for _, row in df_all.iterrows()}
 
     # ── Pre-filter: retrieve top candidates ───────────────────────────────────
-    # Two modes controlled by USE_RAG in config.py:
-    #
-    # Mode 1 (default, USE_RAG=False): in-memory hybrid scoring
-    #   Loads embeddings as numpy arrays, combines with rule-based score.
-    #   hybrid = RULE_WEIGHT * rule_score + SEMANTIC_WEIGHT * semantic_score * 100
-    #
-    # Mode 2 (USE_RAG=True): ChromaDB vector database
-    #   Queries the persistent index built by: python vector_store.py
-    #   Falls back to Mode 1 if index is empty or chromadb not installed.
-    #
-    # Read runtime settings (admin may have changed them from the UI)
+    # Hybrid scoring: rule-based (60%) + semantic embeddings (40%)
+    # Settings can be adjusted at runtime from the Admin panel.
     cfg              = _settings.load()
-    use_rag          = cfg["use_rag"]
     rule_weight      = cfg["rule_weight"]
     semantic_weight  = cfg["semantic_weight"]
     candidate_limit  = cfg["llm_candidate_limit"]
@@ -370,66 +391,43 @@ def match(profile: dict, resources_path: str = "resources.csv", top_n: int = 8, 
     sem_scores: dict[str, float] = {}
     hybrid_scores: dict[str, float] = {}
 
-    if use_rag:
-        # ── RAG mode: ChromaDB retrieval ──────────────────────────────────────
-        try:
-            from vector_store import retrieve_with_scores, index_exists
-            if index_exists():
-                sem_scores = retrieve_with_scores(profile, top_k=candidate_limit)
-                top_ids    = set(sem_scores.keys())
-                hybrid_scores = {rid: round(score * 100, 1) for rid, score in sem_scores.items()}
-                print(f"[matcher] RAG retrieval: {len(top_ids)} candidates from ChromaDB.")
-            else:
-                print("[matcher] RAG mode enabled but index is empty — run: python vector_store.py")
-                print("[matcher] Falling back to in-memory hybrid scoring.")
-                use_rag = False
-        except Exception as e:
-            print(f"[matcher] RAG retrieval failed ({e}). Falling back to in-memory.")
-            use_rag = False
+    # ── In-memory hybrid scoring ──────────────────────────────────────────────
+    try:
+        import numpy as np
+        raw_embeddings = _cached_resource_embeddings(resources_path)
+        if raw_embeddings:
+            np_embeddings = {rid: np.array(vec) for rid, vec in raw_embeddings.items()}
+            sem_scores = compute_semantic_scores(profile, np_embeddings)
+            print(f"[matcher] Semantic scores computed for {len(sem_scores)} resources.")
+    except Exception as e:
+        print(f"[matcher] Semantic scoring failed ({e}). Using rule-based only.")
 
-    if not use_rag:
-        # ── Default mode: in-memory hybrid scoring ────────────────────────────
-        try:
-            import numpy as np
-            raw_embeddings = _cached_resource_embeddings(resources_path)
-            if raw_embeddings:
-                np_embeddings = {rid: np.array(vec) for rid, vec in raw_embeddings.items()}
-                sem_scores = compute_semantic_scores(profile, np_embeddings)
-                print(f"[matcher] Semantic scores computed for {len(sem_scores)} resources.")
-        except Exception as e:
-            print(f"[matcher] Semantic scoring failed ({e}). Using rule-based only.")
-
-        # Normalise semantic scores min-max within the candidate set so the
-        # best semantic match = 1.0 and the worst = 0.0.
-        # Without this, all 8 programs (same domain) cluster at 0.62–0.78,
-        # giving only ~6 pts variation — the semantic component is invisible.
-        # After normalisation, the 0.4 weight contributes a full 0–40 pt range.
-        if sem_scores:
-            s_min = min(sem_scores.values())
-            s_max = max(sem_scores.values())
-            sem_range = s_max - s_min
-            if sem_range > 1e-6:
-                sem_scores_norm = {
-                    rid: (s - s_min) / sem_range
-                    for rid, s in sem_scores.items()
-                }
-            else:
-                # All identical — treat as 0.5 (neutral)
-                sem_scores_norm = {rid: 0.5 for rid in sem_scores}
+    # Normalise semantic scores min-max so the 0.4 weight contributes a full 0–40 pt range.
+    if sem_scores:
+        s_min = min(sem_scores.values())
+        s_max = max(sem_scores.values())
+        sem_range = s_max - s_min
+        if sem_range > 1e-6:
+            sem_scores_norm = {
+                rid: (s - s_min) / sem_range
+                for rid, s in sem_scores.items()
+            }
         else:
-            sem_scores_norm = {}
+            sem_scores_norm = {rid: 0.5 for rid in sem_scores}
+    else:
+        sem_scores_norm = {}
 
-        pre_scores = []
-        hybrid_scores: dict[str, float] = {}
-        for _, row in df_filtered.iterrows():
-            rule_sc, _ = rule_based_score(row, profile)
-            sem_sc     = sem_scores_norm.get(row["id"], 0.0)
-            hybrid_sc  = (rule_weight * rule_sc + semantic_weight * sem_sc * 100
-                          if sem_scores_norm else rule_sc)
-            hybrid_scores[row["id"]] = round(hybrid_sc, 1)
-            pre_scores.append((hybrid_sc, row["id"]))
-        pre_scores.sort(reverse=True)
-        top_ids = {rid for _, rid in pre_scores[:candidate_limit]}
+    pre_scores = []
+    hybrid_scores: dict[str, float] = {}
+    for _, row in df_filtered.iterrows():
+        rule_sc, _ = rule_based_score(row, profile)
+        sem_sc     = sem_scores_norm.get(row["id"], 0.0)
+        hybrid_sc  = (rule_weight * rule_sc + semantic_weight * sem_sc * 100
+                      if sem_scores_norm else rule_sc)
+        hybrid_scores[row["id"]] = round(hybrid_sc, 1)
+        pre_scores.append((hybrid_sc, row["id"]))
+    pre_scores.sort(reverse=True)
+    top_ids = {rid for _, rid in pre_scores[:candidate_limit]}
 
     df_candidates = df_filtered[df_filtered["id"].isin(top_ids)].copy()
 
@@ -471,11 +469,16 @@ def match(profile: dict, resources_path: str = "resources.csv", top_n: int = 8, 
                     "priority":      "short-term",
                     "reasons":       reasons,
                     "advice":        "",
+                    "justification": "",
                     "url":           row["url"],
                     "stages_raw":    list(row["stages"]),
                     "llm_powered":   False,
                     "llm_source":    "rule-based",
                     "semantic_score": round(sem_scores_norm.get(row["id"], 0.0) * 100, 1),
+                    "duration":              row.get("duration", ""),
+                    "deliverables":          row.get("deliverables", ""),
+                    "key_benefit":           row.get("key_benefit", ""),
+                    "eligibility_criteria":  row.get("ideal_profile", ""),
                 })
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_n]
@@ -496,11 +499,16 @@ def match(profile: dict, resources_path: str = "resources.csv", top_n: int = 8, 
             "priority":      item.get("priority", "short-term"),
             "reasons":       item.get("reasons", []),
             "advice":        item.get("advice", ""),
+            "justification": item.get("justification", item.get("advice", "")),
             "url":           row["url"],
             "stages_raw":    list(row["stages"]),
             "llm_powered":   True,
             "llm_source":    llm_source,
             "semantic_score": round(sem_scores_norm.get(rid, 0.0) * 100, 1),
+            "duration":              row.get("duration", ""),
+            "deliverables":          row.get("deliverables", ""),
+            "key_benefit":           row.get("key_benefit", ""),
+            "eligibility_criteria":  row.get("ideal_profile", ""),
         })
 
     results.sort(key=lambda x: x["score"], reverse=True)
