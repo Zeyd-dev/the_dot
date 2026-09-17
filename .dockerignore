@@ -1,0 +1,44 @@
+# Node modules — installed fresh in Docker by npm ci
+frontend/node_modules/
+node_modules/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environment / secrets (injected via HuggingFace Secrets, not file)
+.env
+.env.local
+.env.*.local
+
+# Dev only
+venv/
+.venv/
+env/
+
+# Runtime artifacts
+chroma_db/
+.cache/
+models/
+static_frontend/
+settings.json
+
+# Local databases
+*.db
+*.sqlite
+
+# Generated documents
+*.pptx
+*.docx
+*.tex
+rapport_the_dot.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore

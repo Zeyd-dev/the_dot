@@ -45,12 +45,11 @@ rapport_the_dot.*
 .cache/
 models/
 
-# React frontend (dev only — not deployed to HuggingFace)
-frontend/
+# React build output (built inside Docker — not committed)
+static_frontend/
 node_modules/
 
-# Dev / infra files not needed for jury
-api.py
+# Dev / infra files
 start_dev.sh
 railway.toml
 TheDot_Guide_Deploiement.pdf
