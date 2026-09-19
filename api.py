@@ -111,6 +111,86 @@ def _log_submission(req, response):
 _ensure_submissions_table()
 
 
+# ── Programs DB helpers ─────────────────────────────────────────────────────
+
+def _ensure_programs_table():
+    """Create programs table and seed from CSV if empty."""
+    if not DATABASE_URL:
+        return
+    try:
+        conn = _get_conn()
+        cur  = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS programs (
+                id                 TEXT PRIMARY KEY,
+                name               TEXT NOT NULL,
+                type               TEXT,
+                description        TEXT,
+                ideal_profile      TEXT,
+                not_suited_for     TEXT,
+                sequencing_note    TEXT,
+                stages             TEXT,
+                needs              TEXT,
+                sectors            TEXT,
+                diaspora_only      BOOLEAN DEFAULT FALSE,
+                outside_hub_only   BOOLEAN DEFAULT FALSE,
+                international_focus BOOLEAN DEFAULT FALSE,
+                url                TEXT,
+                duration           TEXT,
+                deliverables       TEXT,
+                key_benefit        TEXT,
+                created_at         TIMESTAMPTZ DEFAULT NOW(),
+                updated_at         TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+
+        # Seed from CSV if table is empty
+        cur.execute("SELECT COUNT(*) FROM programs")
+        count = cur.fetchone()[0]
+        if count == 0:
+            _seed_programs_from_csv(cur)
+            conn.commit()
+            print(f"[DB] Programs table seeded from CSV")
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"[DB] ensure_programs_table error: {e}")
+
+
+def _seed_programs_from_csv(cur):
+    """Insert all rows from resources.csv into the programs table."""
+    import csv as _csv
+    csv_path = RESOURCES_PATH
+    if not os.path.isfile(csv_path):
+        return
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        for row in reader:
+            cur.execute("""
+                INSERT INTO programs
+                  (id, name, type, description, ideal_profile, not_suited_for,
+                   sequencing_note, stages, needs, sectors, diaspora_only,
+                   outside_hub_only, international_focus, url, duration, deliverables, key_benefit)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (id) DO NOTHING
+            """, (
+                row.get("id",""), row.get("name",""), row.get("type",""),
+                row.get("description",""), row.get("ideal_profile",""),
+                row.get("not_suited_for",""), row.get("sequencing_note",""),
+                row.get("stages",""), row.get("needs",""), row.get("sectors","all"),
+                row.get("diaspora_only","FALSE").upper() == "TRUE",
+                row.get("outside_hub_only","FALSE").upper() == "TRUE",
+                row.get("international_focus","FALSE").upper() == "TRUE",
+                row.get("url",""), row.get("duration",""),
+                row.get("deliverables",""), row.get("key_benefit",""),
+            ))
+
+
+_ensure_programs_table()
+
+
 # ── Request / Response schemas ──────────────────────────────────────────────
 
 class DiagnosticRequest(BaseModel):
@@ -460,10 +540,123 @@ def admin_save_settings(body: SettingsPayload, pw: str = ""):
 
 @app.get("/api/programs")
 def list_programs():
+    """List programs — from Supabase if available, else CSV."""
+    if DATABASE_URL:
+        try:
+            conn = _get_conn()
+            cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM programs ORDER BY id")
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close(); conn.close()
+            if rows:
+                return rows
+        except Exception as e:
+            print(f"[DB] list_programs error: {e}")
+    # Fallback to CSV
     try:
         import pandas as pd
         df = pd.read_csv(RESOURCES_PATH)
         return df.to_dict(orient="records")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Program CRUD (admin) ────────────────────────────────────────────────────
+
+class ProgramPayload(BaseModel):
+    id: str = ""
+    name: str
+    type: str = "program"
+    description: str = ""
+    ideal_profile: str = ""
+    not_suited_for: str = ""
+    sequencing_note: str = ""
+    stages: str = ""
+    needs: str = ""
+    sectors: str = "all"
+    diaspora_only: bool = False
+    outside_hub_only: bool = False
+    international_focus: bool = False
+    url: str = ""
+    duration: str = ""
+    deliverables: str = ""
+    key_benefit: str = ""
+
+
+def _next_program_id(cur) -> str:
+    cur.execute("SELECT id FROM programs WHERE id ~ '^R[0-9]+$'")
+    ids = [int(r[0][1:]) for r in cur.fetchall()]
+    return f"R{(max(ids)+1):03d}" if ids else "R001"
+
+
+@app.post("/api/admin/programs")
+def admin_add_program(body: ProgramPayload, pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    try:
+        conn = _get_conn()
+        cur  = conn.cursor()
+        prog_id = body.id.strip() or _next_program_id(cur)
+        cur.execute("""
+            INSERT INTO programs
+              (id, name, type, description, ideal_profile, not_suited_for,
+               sequencing_note, stages, needs, sectors, diaspora_only,
+               outside_hub_only, international_focus, url, duration, deliverables, key_benefit)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (id) DO UPDATE SET
+              name=EXCLUDED.name, type=EXCLUDED.type, description=EXCLUDED.description,
+              ideal_profile=EXCLUDED.ideal_profile, not_suited_for=EXCLUDED.not_suited_for,
+              sequencing_note=EXCLUDED.sequencing_note, stages=EXCLUDED.stages,
+              needs=EXCLUDED.needs, sectors=EXCLUDED.sectors,
+              diaspora_only=EXCLUDED.diaspora_only, outside_hub_only=EXCLUDED.outside_hub_only,
+              international_focus=EXCLUDED.international_focus, url=EXCLUDED.url,
+              duration=EXCLUDED.duration, deliverables=EXCLUDED.deliverables,
+              key_benefit=EXCLUDED.key_benefit, updated_at=NOW()
+        """, (
+            prog_id, body.name, body.type, body.description, body.ideal_profile,
+            body.not_suited_for, body.sequencing_note, body.stages, body.needs,
+            body.sectors, body.diaspora_only, body.outside_hub_only,
+            body.international_focus, body.url, body.duration,
+            body.deliverables, body.key_benefit,
+        ))
+        conn.commit(); cur.close(); conn.close()
+        return {"ok": True, "id": prog_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/programs/{prog_id}")
+def admin_delete_program(prog_id: str, pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    try:
+        conn = _get_conn()
+        cur  = conn.cursor()
+        cur.execute("DELETE FROM programs WHERE id = %s", (prog_id,))
+        conn.commit(); cur.close(); conn.close()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/programs/seed")
+def admin_reseed_programs(pw: str = ""):
+    """Re-seed programs table from resources.csv (clears existing rows first)."""
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    try:
+        conn = _get_conn()
+        cur  = conn.cursor()
+        cur.execute("DELETE FROM programs")
+        _seed_programs_from_csv(cur)
+        conn.commit(); cur.close(); conn.close()
+        return {"ok": True, "message": "Programs re-seeded from CSV"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

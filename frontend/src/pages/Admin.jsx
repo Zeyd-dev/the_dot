@@ -393,51 +393,260 @@ function DiagnosticsTab({ pw }) {
   )
 }
 
+// ── Add/Edit Program form ─────────────────────────────────────────────────────
+
+const EMPTY_PROG = {
+  id:'', name:'', type:'program', description:'', ideal_profile:'',
+  not_suited_for:'', sequencing_note:'', stages:'', needs:'', sectors:'all',
+  diaspora_only: false, outside_hub_only: false, international_focus: false,
+  url:'', duration:'', deliverables:'', key_benefit:'',
+}
+
+const NEEDS_LIST = [
+  'acceleration','ai','branding','coaching','cohort','community','content_creation',
+  'content_production','design','diaspora_support','distribution','events','fiscal',
+  'hosting','incorporation','internationalization','investor_readiness','leadership',
+  'legal','legal_structuring','market_access','mentorship','networking','partnerships',
+  'product','recruitment','regional_support','scaling','soft_landing','strategy',
+  'tech_support','team_building','workspace','workspace_events',
+]
+const STAGE_LIST  = ['ideation','pre-seed','seed','growth','scale']
+const SECTOR_LIST = ['all','tech','fintech','healthtech','edtech','agritech','cleantech','commerce','industry','manufacturing','retail','saas','marketplace','other']
+const TYPE_LIST   = ['program','mentorship','service','network','event','other']
+
+function ProgramForm({ initial, onSave, onCancel, pw }) {
+  const [form, setForm] = useState(initial ?? EMPTY_PROG)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr]   = useState('')
+
+  function toggleList(field, val) {
+    const cur = form[field] ? form[field].split(',').map(s=>s.trim()).filter(Boolean) : []
+    const next = cur.includes(val) ? cur.filter(x=>x!==val) : [...cur, val]
+    setForm(f => ({ ...f, [field]: next.join(',') }))
+  }
+  function hasItem(field, val) {
+    return (form[field]||'').split(',').map(s=>s.trim()).includes(val)
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    if (!form.name.trim()) { setErr('Le nom est obligatoire'); return }
+    if (!form.stages)      { setErr('Au moins un stade est obligatoire'); return }
+    if (!form.needs)       { setErr('Au moins un besoin est obligatoire'); return }
+    setBusy(true); setErr('')
+    try {
+      const r = await fetch(`${API}/api/admin/programs?pw=${encodeURIComponent(pw)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const d = await r.json()
+      if (!r.ok) { setErr(d.detail ?? 'Erreur'); setBusy(false); return }
+      onSave(d.id)
+    } catch (e) { setErr('Erreur réseau'); setBusy(false) }
+  }
+
+  return (
+    <form onSubmit={submit} className={s.progForm}>
+      <div className={s.formGrid3}>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Nom *</label>
+          <input className={s.formInput} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Nom du programme" />
+        </div>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Type *</label>
+          <select className={s.formSelect} value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}>
+            {TYPE_LIST.map(t=><option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div className={s.formField}>
+          <label className={s.formLabel}>URL</label>
+          <input className={s.formInput} value={form.url} onChange={e=>setForm(f=>({...f,url:e.target.value}))} placeholder="https://…" />
+        </div>
+      </div>
+
+      <div className={s.formField}>
+        <label className={s.formLabel}>Description *</label>
+        <textarea className={s.formTextarea} rows={3} value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} />
+      </div>
+      <div className={s.formGrid2}>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Profil idéal</label>
+          <textarea className={s.formTextarea} rows={2} value={form.ideal_profile} onChange={e=>setForm(f=>({...f,ideal_profile:e.target.value}))} />
+        </div>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Non adapté pour</label>
+          <textarea className={s.formTextarea} rows={2} value={form.not_suited_for} onChange={e=>setForm(f=>({...f,not_suited_for:e.target.value}))} />
+        </div>
+      </div>
+      <div className={s.formGrid3}>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Durée</label>
+          <input className={s.formInput} value={form.duration} onChange={e=>setForm(f=>({...f,duration:e.target.value}))} placeholder="ex: 4 mois" />
+        </div>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Bénéfice clé</label>
+          <input className={s.formInput} value={form.key_benefit} onChange={e=>setForm(f=>({...f,key_benefit:e.target.value}))} />
+        </div>
+        <div className={s.formField}>
+          <label className={s.formLabel}>Secteurs</label>
+          <select className={s.formSelect} value={form.sectors} onChange={e=>setForm(f=>({...f,sectors:e.target.value}))}>
+            {SECTOR_LIST.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className={s.formField}>
+        <label className={s.formLabel}>Stades éligibles *</label>
+        <div className={s.checkGrid}>
+          {STAGE_LIST.map(st => (
+            <label key={st} className={`${s.checkPill} ${hasItem('stages',st)?s.checkPillOn:''}`}>
+              <input type="checkbox" checked={hasItem('stages',st)} onChange={()=>toggleList('stages',st)} style={{display:'none'}} />
+              {st}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className={s.formField}>
+        <label className={s.formLabel}>Besoins couverts *</label>
+        <div className={s.checkGrid}>
+          {NEEDS_LIST.map(n => (
+            <label key={n} className={`${s.checkPill} ${hasItem('needs',n)?s.checkPillOn:''}`}>
+              <input type="checkbox" checked={hasItem('needs',n)} onChange={()=>toggleList('needs',n)} style={{display:'none'}} />
+              {n}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className={s.formChecks}>
+        {[['diaspora_only','Diaspora uniquement'],['outside_hub_only','Hors hub uniquement'],['international_focus','Focus international']].map(([k,l])=>(
+          <label key={k} className={s.formCheckLabel}>
+            <input type="checkbox" checked={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.checked}))} /> {l}
+          </label>
+        ))}
+      </div>
+
+      {err && <p className={s.settingsErr}>{err}</p>}
+      <div className={s.formBtns}>
+        <button type="submit" className={s.saveBtn} disabled={busy}>{busy?'Enregistrement…':'✅ Enregistrer'}</button>
+        <button type="button" className={s.resetBtn} onClick={onCancel}>Annuler</button>
+      </div>
+    </form>
+  )
+}
+
 // ── Programs tab ──────────────────────────────────────────────────────────────
 
 function ProgramsTab({ pw }) {
-  const [programs, setPrograms] = useState([])
-  const [loading, setLoading]   = useState(true)
+  const [programs, setPrograms]   = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [showAdd, setShowAdd]     = useState(false)
+  const [editing, setEditing]     = useState(null)   // program id being edited
+  const [confirmDel, setConfirmDel] = useState(null) // program id to delete
+  const [msg, setMsg]             = useState('')
 
-  useEffect(() => {
-    fetch(`${API}/api/programs`)
-      .then(r => r.json())
-      .then(d => { setPrograms(Array.isArray(d) ? d : []); setLoading(false) })
-      .catch(() => setLoading(false))
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await fetch(`${API}/api/programs`)
+      const d = await r.json()
+      setPrograms(Array.isArray(d) ? d : [])
+    } catch {}
+    setLoading(false)
   }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function handleDelete(id) {
+    const r = await fetch(`${API}/api/admin/programs/${encodeURIComponent(id)}?pw=${encodeURIComponent(pw)}`, { method: 'DELETE' })
+    if (r.ok) { setMsg('Programme supprimé.'); setConfirmDel(null); load() }
+    else { setMsg('Erreur lors de la suppression.') }
+  }
+
+  async function handleReseed() {
+    if (!confirm('Réinitialiser le catalogue depuis resources.csv ? Tous les programmes ajoutés manuellement seront perdus.')) return
+    const r = await fetch(`${API}/api/admin/programs/seed?pw=${encodeURIComponent(pw)}`, { method: 'POST' })
+    if (r.ok) { setMsg('Catalogue réinitialisé depuis CSV.'); load() }
+  }
+
+  function handleSaved() { setShowAdd(false); setEditing(null); load(); setMsg('Programme enregistré.') }
 
   if (loading) return <div className={s.loading}>Chargement…</div>
 
+  const editingProg = editing ? programs.find(p => p.id === editing) : null
+
   return (
     <div className={s.progsTab}>
-      <p className={s.progsNote}>
-        📋 {programs.length} programmes dans le catalogue — lecture seule (modifiable via <code>resources.csv</code>)
-      </p>
-      {programs.map(p => (
-        <div key={p.id} className={s.progCard}>
-          <div className={s.progCardTop}>
-            <div>
-              <div className={s.progName}>{p.name}</div>
-              <div className={s.progMeta}>
-                <span className={s.progId}>{p.id}</span>
-                <span className={s.progType}>{p.type}</span>
-                <span className={s.progStages}>{p.stages}</span>
+      {/* Toolbar */}
+      <div className={s.progsToolbar}>
+        <span className={s.progsCount}>📋 {programs.length} programmes</span>
+        <div style={{display:'flex',gap:8}}>
+          <button className={s.addProgBtn} onClick={()=>{setShowAdd(v=>!v);setEditing(null)}}>
+            {showAdd ? '✕ Annuler' : '➕ Ajouter un programme'}
+          </button>
+          <button className={s.resetBtn} onClick={handleReseed} title="Réinitialiser depuis resources.csv">
+            🔄 Réinitialiser CSV
+          </button>
+        </div>
+      </div>
+      {msg && <p className={s.settingsOk}>{msg}</p>}
+
+      {/* Add form */}
+      {showAdd && !editing && (
+        <div className={s.progFormWrap}>
+          <div className={s.progFormTitle}>➕ Nouveau programme</div>
+          <ProgramForm pw={pw} onSave={handleSaved} onCancel={()=>setShowAdd(false)} />
+        </div>
+      )}
+
+      {/* Edit form */}
+      {editing && editingProg && (
+        <div className={s.progFormWrap}>
+          <div className={s.progFormTitle}>✏️ Modifier : {editingProg.name}</div>
+          <ProgramForm pw={pw} initial={editingProg} onSave={handleSaved} onCancel={()=>setEditing(null)} />
+        </div>
+      )}
+
+      {/* Program list */}
+      {programs.map(p => {
+        const needsStr = typeof p.needs === 'string' ? p.needs : (Array.isArray(p.needs) ? p.needs.join(',') : '')
+        const stagesStr = typeof p.stages === 'string' ? p.stages : (Array.isArray(p.stages) ? p.stages.join(',') : '')
+        return (
+          <div key={p.id} className={s.progCard}>
+            <div className={s.progCardTop}>
+              <div style={{flex:1,minWidth:0}}>
+                <div className={s.progName}>{p.name}</div>
+                <div className={s.progMeta}>
+                  <span className={s.progId}>{p.id}</span>
+                  <span className={s.progType}>{p.type}</span>
+                  <span className={s.progStages}>{stagesStr}</span>
+                </div>
+              </div>
+              <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'center'}}>
+                {p.url && <a href={p.url} target="_blank" rel="noreferrer" className={s.progLink}>↗</a>}
+                <button className={s.editProgBtn} onClick={()=>{setEditing(p.id);setShowAdd(false)}}>✏️</button>
+                {confirmDel === p.id ? (
+                  <>
+                    <button className={s.deleteBtn} style={{padding:'4px 10px'}} onClick={()=>handleDelete(p.id)}>Confirmer</button>
+                    <button className={s.resetBtn} style={{padding:'4px 10px'}} onClick={()=>setConfirmDel(null)}>✕</button>
+                  </>
+                ) : (
+                  <button className={s.deleteBtn} style={{padding:'4px 10px'}} onClick={()=>setConfirmDel(p.id)}>🗑️</button>
+                )}
               </div>
             </div>
-            {p.url && (
-              <a href={p.url} target="_blank" rel="noreferrer" className={s.progLink}>↗ Voir</a>
+            <div className={s.progDesc}>{p.description}</div>
+            {needsStr && (
+              <div className={s.progNeeds}>
+                {needsStr.split(',').slice(0,6).map(n=>(
+                  <span key={n} className={s.needsTag}>{n.trim()}</span>
+                ))}
+              </div>
             )}
           </div>
-          <div className={s.progDesc}>{p.description}</div>
-          {p.needs && (
-            <div className={s.progNeeds}>
-              {p.needs.split(',').slice(0,6).map(n => (
-                <span key={n} className={s.needsTag}>{n.trim()}</span>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

@@ -252,6 +252,68 @@
 }
 .progLink:hover { background: rgba(96,165,250,0.1); }
 
+/* ── Programs CRUD ──────────────────────────────────────────────────────── */
+.progsToolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 4px; flex-wrap: wrap; gap: 8px;
+}
+.progsCount { font-size: 0.85rem; color: #64748b; }
+.addProgBtn {
+  background: #2563eb; color: #fff; border: none; border-radius: 8px;
+  padding: 8px 14px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  font-family: 'DM Sans', sans-serif; transition: background .2s;
+}
+.addProgBtn:hover { background: #1d4ed8; }
+.editProgBtn {
+  background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.25);
+  color: #93c5fd; border-radius: 6px; padding: 4px 10px; font-size: 0.82rem;
+  cursor: pointer; font-family: 'DM Sans', sans-serif; transition: background .2s;
+}
+.editProgBtn:hover { background: rgba(96,165,250,0.2); }
+
+.progFormWrap {
+  background: linear-gradient(145deg, #0a1628, #0e1e3f);
+  border: 1px solid rgba(96,165,250,0.2); border-radius: 16px; padding: 20px 24px;
+}
+.progFormTitle { font-size: 0.9rem; font-weight: 700; color: #e2e8f0; margin-bottom: 16px; }
+
+.progForm { display: flex; flex-direction: column; gap: 14px; }
+.formGrid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.formGrid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.formField { display: flex; flex-direction: column; gap: 4px; }
+.formLabel { font-size: 0.78rem; font-weight: 600; color: #94a3b8; }
+.formInput {
+  background: #0d1b35; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 9px 12px; color: #f1f5f9; font-size: 0.88rem; outline: none;
+  font-family: 'DM Sans', sans-serif; transition: border-color .2s;
+}
+.formInput:focus { border-color: #3b82f6; }
+.formTextarea {
+  background: #0d1b35; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 9px 12px; color: #f1f5f9; font-size: 0.88rem; outline: none;
+  font-family: 'DM Sans', sans-serif; transition: border-color .2s; resize: vertical;
+}
+.formTextarea:focus { border-color: #3b82f6; }
+.formSelect {
+  background: #0d1b35; border: 1px solid #1e293b; border-radius: 8px;
+  padding: 9px 12px; color: #f1f5f9; font-size: 0.88rem; outline: none;
+  font-family: 'DM Sans', sans-serif; cursor: pointer;
+}
+.checkGrid { display: flex; flex-wrap: wrap; gap: 6px; }
+.checkPill {
+  background: rgba(255,255,255,0.04); border: 1px solid #1e293b; border-radius: 20px;
+  padding: 3px 11px; font-size: 0.75rem; color: #64748b; cursor: pointer;
+  user-select: none; transition: all .15s;
+}
+.checkPillOn {
+  background: rgba(37,99,235,0.2); border-color: #3b82f6; color: #93c5fd;
+}
+.formChecks { display: flex; gap: 20px; flex-wrap: wrap; }
+.formCheckLabel {
+  display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;
+}
+.formBtns { display: flex; gap: 10px; margin-top: 4px; }
+
 /* ── Settings tab ───────────────────────────────────────────────────────── */
 .settingsTab { display: flex; flex-direction: column; gap: 20px; max-width: 700px; }
 .settingsSection {

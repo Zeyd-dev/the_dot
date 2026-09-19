@@ -94,28 +94,65 @@ def _cached_resource_embeddings(path: str = "resources.csv") -> dict:
         return {}
 
 
-@st.cache_data(show_spinner=False)
-def load_resources(path: str = "resources.csv") -> pd.DataFrame:
-    """
-    Load and parse resources.csv.
-    Cached with @st.cache_data so the CSV is read from disk only once per
-    Streamlit server session, not on every match() call.
-    """
-    df = pd.read_csv(path)
+def _load_from_supabase() -> "pd.DataFrame | None":
+    """Try to load programs from Supabase. Returns None on any failure."""
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        return None
+    try:
+        import psycopg2, psycopg2.extras
+        conn = psycopg2.connect(db_url, sslmode="require")
+        cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM programs ORDER BY id")
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        if not rows:
+            return None
+        df = pd.DataFrame([dict(r) for r in rows])
+        # Drop internal Supabase columns if present
+        df = df.drop(columns=[c for c in ("created_at", "updated_at") if c in df.columns])
+        print(f"[matcher] Loaded {len(df)} programs from Supabase")
+        return df
+    except Exception as e:
+        print(f"[matcher] Supabase program load failed: {e}")
+        return None
+
+
+def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply shared normalization (list cols, bools, optional cols)."""
     list_cols = ["stages", "needs", "sectors"]
     for col in list_cols:
         if col in df.columns:
-            df[col] = df[col].apply(lambda x: [s.strip() for s in str(x).split(",")])
+            df[col] = df[col].apply(
+                lambda x: [s.strip() for s in str(x).split(",")] if isinstance(x, str) else (x if isinstance(x, list) else [])
+            )
     for bool_col in ("diaspora_only", "outside_hub_only", "international_focus"):
         if bool_col in df.columns:
-            df[bool_col] = df[bool_col].astype(str).str.lower() == "true"
-    # Fill optional enrichment columns added in v2
+            df[bool_col] = df[bool_col].apply(
+                lambda x: bool(x) if isinstance(x, bool) else str(x).lower() == "true"
+            )
     for opt_col in ("duration", "deliverables", "key_benefit", "ideal_profile"):
         if opt_col not in df.columns:
             df[opt_col] = ""
         else:
             df[opt_col] = df[opt_col].fillna("")
     return df
+
+
+@st.cache_data(show_spinner=False)
+def load_resources(path: str = "resources.csv") -> pd.DataFrame:
+    """
+    Load programs from Supabase (if available), falling back to resources.csv.
+    Cached with @st.cache_data in Streamlit context; runs fresh in FastAPI context.
+    """
+    df = _load_from_supabase()
+    if df is not None and len(df) > 0:
+        return _normalize_df(df)
+
+    # Fallback: read from CSV
+    print(f"[matcher] Falling back to CSV: {path}")
+    df = pd.read_csv(path)
+    return _normalize_df(df)
 
 
 # ── Hard filters ───────────────────────────────────────────────────────────────
