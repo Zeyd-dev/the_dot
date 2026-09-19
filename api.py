@@ -284,24 +284,68 @@ def admin_stats(pw: str = ""):
         cur.execute("SELECT COUNT(*) FROM submissions WHERE timestamp::date = CURRENT_DATE")
         today = cur.fetchone()[0]
 
+        # This month
+        cur.execute("SELECT COUNT(*) FROM submissions WHERE DATE_TRUNC('month', timestamp) = DATE_TRUNC('month', NOW())")
+        this_month = cur.fetchone()[0]
+
         cur.execute("SELECT effective_stage, COUNT(*) FROM submissions GROUP BY effective_stage ORDER BY COUNT(*) DESC")
         by_stage = {r[0]: r[1] for r in cur.fetchall()}
 
         cur.execute("SELECT sector, COUNT(*) FROM submissions GROUP BY sector ORDER BY COUNT(*) DESC LIMIT 8")
         by_sector = {r[0]: r[1] for r in cur.fetchall()}
 
-        cur.execute("SELECT top_program, COUNT(*) as n FROM submissions WHERE top_program != '' GROUP BY top_program ORDER BY n DESC LIMIT 5")
-        top_programs = [{"name": r[0], "count": r[1]} for r in cur.fetchall()]
+        cur.execute("""
+            SELECT top_program, COUNT(*) as n, AVG(top_score) as avg_score
+            FROM submissions WHERE top_program != ''
+            GROUP BY top_program ORDER BY n DESC LIMIT 8
+        """)
+        top_programs = [{"name": r[0], "count": r[1], "avg_score": round(r[2] or 0, 1)} for r in cur.fetchall()]
+
+        # Average spider scores across all submissions
+        cur.execute("""
+            SELECT
+              AVG((spider_scores->>'team')::float),
+              AVG((spider_scores->>'legal')::float),
+              AVG((spider_scores->>'product')::float),
+              AVG((spider_scores->>'traction')::float),
+              AVG((spider_scores->>'funding')::float),
+              AVG((spider_scores->>'market')::float),
+              AVG((spider_scores->>'branding')::float)
+            FROM submissions WHERE spider_scores IS NOT NULL AND spider_scores != 'null'
+        """)
+        row = cur.fetchone()
+        dim_keys = ['team', 'legal', 'product', 'traction', 'funding', 'market', 'branding']
+        avg_scores = {k: round(v or 0, 1) for k, v in zip(dim_keys, row)} if row else {}
+        global_avg = round(sum(avg_scores.values()) / len(avg_scores)) if avg_scores else 0
+
+        # Monthly trend (last 6 months)
+        cur.execute("""
+            SELECT TO_CHAR(timestamp, 'YYYY-MM') as month, COUNT(*)
+            FROM submissions
+            WHERE timestamp > NOW() - INTERVAL '6 months'
+            GROUP BY month ORDER BY month
+        """)
+        monthly_trend = {r[0]: r[1] for r in cur.fetchall()}
+
+        # Top sector
+        top_sector = list(by_sector.keys())[0] if by_sector else "—"
 
         cur.close()
         conn.close()
-        return {"total": total, "today": today, "by_stage": by_stage, "by_sector": by_sector, "top_programs": top_programs}
+        return {
+            "total": total, "today": today, "this_month": this_month,
+            "global_avg": global_avg, "top_sector": top_sector,
+            "by_stage": by_stage, "by_sector": by_sector,
+            "top_programs": top_programs, "avg_scores": avg_scores,
+            "monthly_trend": monthly_trend,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/admin/submissions")
-def admin_submissions(pw: str = "", limit: int = 50, offset: int = 0):
+def admin_submissions(pw: str = "", limit: int = 50, offset: int = 0,
+                      search: str = "", stage: str = "", sector: str = ""):
     if pw != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Non autorisé")
     if not DATABASE_URL:
@@ -309,23 +353,107 @@ def admin_submissions(pw: str = "", limit: int = 50, offset: int = 0):
     try:
         conn = _get_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("SELECT COUNT(*) FROM submissions")
+
+        filters, params = [], []
+        if search.strip():
+            filters.append("LOWER(startup_name) LIKE %s")
+            params.append(f"%{search.strip().lower()}%")
+        if stage and stage != "all":
+            filters.append("effective_stage = %s"); params.append(stage)
+        if sector and sector != "all":
+            filters.append("sector = %s"); params.append(sector)
+
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+        cur.execute(f"SELECT COUNT(*) FROM submissions {where}", params)
         total = cur.fetchone()["count"]
-        cur.execute("""
+
+        cur.execute(f"""
             SELECT id, startup_name, sector, stage, effective_stage, market_type,
                    team_size, legal_status, top_program, top_score,
                    eligible_count, needs, spider_scores, timestamp
-            FROM submissions
+            FROM submissions {where}
             ORDER BY timestamp DESC
             LIMIT %s OFFSET %s
-        """, (limit, offset))
+        """, params + [limit, offset])
         rows = [dict(r) for r in cur.fetchall()]
-        # Serialize timestamps
         for r in rows:
             r["timestamp"] = r["timestamp"].isoformat() if r["timestamp"] else ""
         cur.close()
         conn.close()
         return {"submissions": rows, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/submissions/{sub_id}")
+def admin_submission_detail(sub_id: int, pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    try:
+        conn = _get_conn()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM submissions WHERE id = %s", (sub_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Not found")
+        r = dict(row)
+        r["timestamp"] = r["timestamp"].isoformat() if r["timestamp"] else ""
+        return r
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/submissions/{sub_id}")
+def admin_delete_submission(sub_id: int, pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    if not DATABASE_URL:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM submissions WHERE id = %s", (sub_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/settings")
+def admin_get_settings(pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    try:
+        import app_settings as _s
+        return _s.load()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SettingsPayload(BaseModel):
+    rule_weight: float
+    semantic_weight: float
+    llm_candidate_limit: int
+    groq_timeout: int
+
+
+@app.post("/api/admin/settings")
+def admin_save_settings(body: SettingsPayload, pw: str = ""):
+    if pw != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    try:
+        import app_settings as _s
+        _s.save(body.dict())
+        return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
