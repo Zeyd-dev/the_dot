@@ -54,3 +54,7 @@ start_dev.sh
 railway.toml
 TheDot_Guide_Deploiement.pdf
 vector_store.py
+
+*.aux
+*.log
+tikz_diagrams_cheatsheet.pdf
