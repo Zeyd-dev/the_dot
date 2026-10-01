@@ -232,7 +232,7 @@ function DiagDetail({ sub, pw, onDelete }) {
   const miniRadarData = {
     labels: DIMS,
     datasets: [{
-      data: DIM_KEYS.map(k => scores[k] ?? 0),
+      data: DIMS.map((d, i) => scores[d] ?? scores[DIM_KEYS[i]] ?? 0),
       fill: true,
       backgroundColor: 'rgba(96,165,250,0.12)',
       borderColor: '#60a5fa',
