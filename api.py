@@ -6,13 +6,16 @@ Runs on port 7860 inside HuggingFace Spaces Docker.
 
 import json
 import os
+import secrets
 import sys
+import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List
 
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -36,7 +39,32 @@ app.add_middleware(
 
 RESOURCES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources.csv")
 DATABASE_URL   = os.getenv("DATABASE_URL", "")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "thedot2026")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+if not ADMIN_PASSWORD:
+    print("[WARNING] ADMIN_PASSWORD env var is not set — admin endpoints are disabled.")
+
+# ── Brute-force protection ──────────────────────────────────────────────────
+# Simple in-memory rate limiter: max 5 failed login attempts per IP per 60s.
+_login_attempts: dict = defaultdict(list)
+_MAX_ATTEMPTS   = 5
+_WINDOW_SECONDS = 60
+
+def _check_rate_limit(ip: str):
+    now = time.time()
+    attempts = [t for t in _login_attempts[ip] if now - t < _WINDOW_SECONDS]
+    _login_attempts[ip] = attempts
+    if len(attempts) >= _MAX_ATTEMPTS:
+        raise HTTPException(status_code=429, detail="Trop de tentatives. Réessayez dans 60 secondes.")
+
+def _record_failed(ip: str):
+    _login_attempts[ip].append(time.time())
+
+def _check_admin(pw: str):
+    """Raise 401/503 if password wrong or not configured. Timing-safe."""
+    if not ADMIN_PASSWORD:
+        raise HTTPException(status_code=503, detail="Admin non configuré (ADMIN_PASSWORD manquant)")
+    if not secrets.compare_digest(pw, ADMIN_PASSWORD):
+        raise HTTPException(status_code=401, detail="Non autorisé")
 
 
 # ── Database helpers ────────────────────────────────────────────────────────
@@ -342,16 +370,20 @@ class AdminLoginRequest(BaseModel):
 
 
 @app.post("/api/admin/login")
-def admin_login(body: AdminLoginRequest):
-    if body.password != ADMIN_PASSWORD:
+def admin_login(body: AdminLoginRequest, request: Request):
+    ip = request.client.host or "unknown"
+    _check_rate_limit(ip)
+    if not ADMIN_PASSWORD:
+        raise HTTPException(status_code=503, detail="Admin non configuré (ADMIN_PASSWORD manquant)")
+    if not secrets.compare_digest(body.password, ADMIN_PASSWORD):
+        _record_failed(ip)
         raise HTTPException(status_code=401, detail="Mot de passe incorrect")
     return {"ok": True}
 
 
 @app.get("/api/admin/stats")
 def admin_stats(pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
@@ -426,8 +458,7 @@ def admin_stats(pw: str = ""):
 @app.get("/api/admin/submissions")
 def admin_submissions(pw: str = "", limit: int = 50, offset: int = 0,
                       search: str = "", stage: str = "", sector: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         return {"submissions": [], "total": 0}
     try:
@@ -468,8 +499,7 @@ def admin_submissions(pw: str = "", limit: int = 50, offset: int = 0,
 
 @app.get("/api/admin/submissions/{sub_id}")
 def admin_submission_detail(sub_id: int, pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
@@ -492,8 +522,7 @@ def admin_submission_detail(sub_id: int, pw: str = ""):
 
 @app.delete("/api/admin/submissions/{sub_id}")
 def admin_delete_submission(sub_id: int, pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
@@ -510,8 +539,7 @@ def admin_delete_submission(sub_id: int, pw: str = ""):
 
 @app.get("/api/admin/settings")
 def admin_get_settings(pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     try:
         import app_settings as _s
         return _s.load()
@@ -528,8 +556,7 @@ class SettingsPayload(BaseModel):
 
 @app.post("/api/admin/settings")
 def admin_save_settings(body: SettingsPayload, pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     try:
         import app_settings as _s
         _s.save(body.dict())
@@ -591,8 +618,7 @@ def _next_program_id(cur) -> str:
 
 @app.post("/api/admin/programs")
 def admin_add_program(body: ProgramPayload, pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
@@ -629,8 +655,7 @@ def admin_add_program(body: ProgramPayload, pw: str = ""):
 
 @app.delete("/api/admin/programs/{prog_id}")
 def admin_delete_program(prog_id: str, pw: str = ""):
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
@@ -646,8 +671,7 @@ def admin_delete_program(prog_id: str, pw: str = ""):
 @app.post("/api/admin/programs/seed")
 def admin_reseed_programs(pw: str = ""):
     """Re-seed programs table from resources.csv (clears existing rows first)."""
-    if pw != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Non autorisé")
+    _check_admin(pw)
     if not DATABASE_URL:
         raise HTTPException(status_code=503, detail="DATABASE_URL not configured")
     try:
