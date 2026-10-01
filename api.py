@@ -414,16 +414,13 @@ def admin_stats(pw: str = ""):
         top_programs = [{"name": r[0], "count": r[1], "avg_score": round(r[2] or 0, 1)} for r in cur.fetchall()]
 
         # Average spider scores across all submissions
-        cur.execute("""
-            SELECT
-              AVG((spider_scores->>'team')::float),
-              AVG((spider_scores->>'legal')::float),
-              AVG((spider_scores->>'product')::float),
-              AVG((spider_scores->>'traction')::float),
-              AVG((spider_scores->>'funding')::float),
-              AVG((spider_scores->>'market')::float),
-              AVG((spider_scores->>'branding')::float)
-            FROM submissions WHERE spider_scores IS NOT NULL AND spider_scores != 'null'
+        avg_cols = ",\n              ".join(
+            f"AVG((spider_scores->>'{d}')::float)" for d in MATURITY_DIMS
+        )
+        cur.execute(f"""
+            SELECT {avg_cols}
+            FROM submissions
+            WHERE spider_scores IS NOT NULL AND spider_scores != 'null'
         """)
         row = cur.fetchone()
         dim_keys = ['team', 'legal', 'product', 'traction', 'funding', 'market', 'branding']
